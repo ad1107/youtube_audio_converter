@@ -15,6 +15,7 @@ from datetime import datetime
 from pathlib import Path
 import tkinter as tk
 
+from __init__ import __version__
 # Single source of truth for shared state, constants and dependency checks
 from models_utils import (
     YTDLP_VERSION,
@@ -30,8 +31,7 @@ class YoutubeAudioConverter(tk.Tk, GUIBuilderMixin, GUIDownloaderMixin):
 
     def __init__(self):
         super().__init__()
-        self.title("YouTube Audio Downloader and Converter v1.0.0")
-        self.geometry("1200x820")
+        self.title(f"YouTube Audio Downloader and Converter v{__version__}")
         self.minsize(960, 660)
         self.configure(bg=Theme.BG)
 
