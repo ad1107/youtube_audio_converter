@@ -26,7 +26,7 @@ from gui_builder import GUIBuilderMixin
 from gui_downloader import GUIDownloaderMixin
 
 
-class AudiobookConverter(tk.Tk, GUIBuilderMixin, GUIDownloaderMixin):
+class YoutubeAudioConverter(tk.Tk, GUIBuilderMixin, GUIDownloaderMixin):
 
     def __init__(self):
         super().__init__()
