@@ -20,6 +20,7 @@ except ImportError:
 
 from models_utils import (
     PlaylistJob, _fmt_duration, _parse_ffmpeg_progress,
+    _normalize_cookiesfrombrowser,
     FORMATS, QUALITIES, Theme, LOG_COLOURS,
     get_ffmpeg_path, YTLogger,
 )
@@ -107,6 +108,14 @@ class GUIDownloaderMixin:
             messagebox.showwarning("No Output","Please set an output folder.")
             return
 
+        cookiefile = getattr(self, "var_cookiefile", None)
+        cookiefile = cookiefile.get().strip() if cookiefile else ""
+        cookies_browser = getattr(self, "var_cookies_browser", None)
+        cookies_browser = cookies_browser.get().strip() if cookies_browser else "None"
+        if cookiefile and not os.path.isfile(cookiefile):
+            messagebox.showerror("Invalid Cookies File", f"Cookies file not found:\n{cookiefile}")
+            return
+
         fmt     = FORMATS.get(self.var_format.get(),  "m4a")
         quality = QUALITIES.get(self.var_quality.get(), "0")
         os.makedirs(out_dir, exist_ok=True)
@@ -174,6 +183,11 @@ class GUIDownloaderMixin:
     def _download_job(self, job: PlaylistJob):
         if self.cancel_flag.is_set():
             job.status = "cancelled"; return
+
+        cookiefile_var = getattr(self, "var_cookiefile", None)
+        cookiefile = cookiefile_var.get().strip() if cookiefile_var else ""
+        cookies_browser_var = getattr(self, "var_cookies_browser", None)
+        cookies_browser = cookies_browser_var.get().strip() if cookies_browser_var else "None"
 
         job.status     = "running"
         job.start_time = time.time()
@@ -298,6 +312,13 @@ class GUIDownloaderMixin:
                 cb_extract_dest = _on_extract_dest,
             ),
         }
+
+        if cookiefile:
+            ydl_opts["cookiefile"] = cookiefile
+            self.log(job.playlist_title, f"Using cookies file: {cookiefile}", "INFO")
+        elif cookies_browser and cookies_browser != "None":
+            ydl_opts["cookiesfrombrowser"] = _normalize_cookiesfrombrowser(cookies_browser)
+            self.log(job.playlist_title, f"Using browser cookies from: {cookies_browser}", "INFO")
 
         if self.var_track_num.get() and self.var_metadata.get():
             ydl_opts["parse_metadata"] = ["%(playlist_index)s:%(track_number)s"]

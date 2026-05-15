@@ -203,6 +203,18 @@ class GUIBuilderMixin:
                                        title="Choose output folder")
         if path: self.var_output_dir.set(path)
 
+    def _browse_cookies(self):
+        path = filedialog.askopenfilename(
+            title="Select YouTube cookies file",
+            filetypes=[("Cookies / Text files", "*.txt"), ("All Files", "*.*")],
+        )
+        if path:
+            self.var_cookiefile.set(path)
+
+    def _clear_cookies(self):
+        self.var_cookiefile.set("")
+        self.var_cookies_browser.set("None")
+
     def _open_output_dir(self):
         path = self.var_output_dir.get()
         os.makedirs(path, exist_ok=True)
@@ -269,6 +281,28 @@ class GUIBuilderMixin:
                    buttonbackground=Theme.BG4).pack(side="left")
         tk.Label(r, text="(jobs at once)", bg=Theme.BG2, fg=Theme.MUTED,
                  font=("Helvetica Neue", 9)).pack(side="left", padx=(6,0))
+
+        r = tk.Frame(body, bg=Theme.BG2); r.pack(fill="x", pady=3)
+        tk.Label(r, text="Cookies File", bg=Theme.BG2, fg=Theme.MUTED,
+                 font=("Helvetica Neue", 10), width=LBL_W, anchor="w").pack(side="left")
+        tk.Entry(r, textvariable=self.var_cookiefile,
+                 bg=Theme.BG3, fg=Theme.TEXT, relief="flat", bd=0,
+                 font=("Courier New", 9), insertbackground=Theme.TEXT
+                 ).pack(side="left", fill="x", expand=True, ipady=6, padx=(0, 6))
+        self._small_btn(r, "Clear", self._clear_cookies).pack(side="right", padx=(4, 0))
+        self._small_btn(r, "Browse…", self._browse_cookies).pack(side="right")
+
+        r = tk.Frame(body, bg=Theme.BG2); r.pack(fill="x", pady=3)
+        tk.Label(r, text="Browser Cookies", bg=Theme.BG2, fg=Theme.MUTED,
+                 font=("Helvetica Neue", 10), width=LBL_W, anchor="w").pack(side="left")
+        ttk.Combobox(
+            r,
+            textvariable=self.var_cookies_browser,
+            values=["None", "chrome", "chromium", "edge", "firefox", "opera", "safari"],
+            state="readonly",
+            font=("Helvetica Neue", 10),
+            width=14,
+        ).pack(side="left")
 
         cb_frame = tk.Frame(body, bg=Theme.BG2)
         cb_frame.pack(fill="x", pady=(8,0))

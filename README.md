@@ -41,12 +41,45 @@ If you omit the folder name, the app uses the playlist title when it can, or a s
 python main.py
 ```
 
+## Run from the CLI
+
+```powershell
+python main.py --cli --input sources.txt --output D:\Audiobooks --concurrent 3
+```
+
+Single URL example:
+
+```powershell
+python main.py --cli --url "https://www.youtube.com/watch?v=wzE0qslqRAw" --format m4a --quality he_24
+```
+
+Cookies support:
+
+```powershell
+python main.py --cli --url "https://www.youtube.com/watch?v=XmB3hWRszBs" --cookies-from-browser chrome
+```
+
+You can also use a browser profile:
+
+```powershell
+python main.py --cli --url "https://www.youtube.com/watch?v=XmB3hWRszBs" --cookies-from-browser "firefox:default"
+```
+
+For the GUI, use either the `Cookies File` picker or the `Browser Cookies` dropdown. If both are set, the file wins.
+
+or:
+
+```powershell
+python main.py --cli --url "https://www.youtube.com/watch?v=XmB3hWRszBs" --cookiefile C:\\path\\to\\cookies.txt
+```
+
 ## Features
 
 - Apple-friendly formats M4A (AAC), MP3, FLAC, ALAC, WAV, AIFF.
 - HE-AAC 24kbps Mono - designed for extreme compression of voice and audiobooks (96kbps, 64kbps, 24kbps) natively via iTunes-compatible encoding.
 - Automatically prevents your PC from sleeping while downloads are running, and can optionally Sleep, Hibernate, or Shutdown when all jobs are complete.
 - **Auto-Fetching FFmpeg**: Bundles FFmpeg and yt-dlp correctly for Windows.
+- CLI mode for batch downloads, single URLs, and cookie-based YouTube authentication.
 
 ## Requirements
 
@@ -57,3 +90,7 @@ python main.py
 ## Notes
 
 This repo does not handle importing into Apple Music or 3uTools. It only prepares the audio files and folder structure.
+
+## Authentication
+
+If YouTube shows a bot-check or sign-in prompt, you can point the app at a `cookies.txt` export or choose a browser session to load cookies from. The cookies file takes priority if both are set.
