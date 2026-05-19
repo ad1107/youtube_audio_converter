@@ -50,6 +50,8 @@ class YoutubeAudioConverter(tk.Tk, GUIBuilderMixin, GUIDownloaderMixin):
         self.var_cookiefile    = tk.StringVar(value="")
         self.var_cookies_browser = tk.StringVar(value="None")
         self.var_use_deno      = tk.BooleanVar(value=False)
+        self.var_autoscroll    = tk.BooleanVar(value=True)
+        self.var_suppress_js   = tk.BooleanVar(value=True)
         # Bug 3 FIX: the old playlist/single-video checkbox has been removed.
         # URL type is auto-detected at download time (see gui_downloader.py).
         self.var_thumbnail     = tk.BooleanVar(value=True)

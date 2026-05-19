@@ -73,6 +73,8 @@ class ConsoleLogger:
         print(msg)
 
     def warning(self, msg):
+        if any(x in msg.lower() for x in ["javascript runtime", "[jsc]", "n challenge", "deno process"]):
+            return
         print(msg, file=sys.stderr)
 
     def error(self, msg):

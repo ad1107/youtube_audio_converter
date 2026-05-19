@@ -72,7 +72,8 @@ class GUIDownloaderMixin:
         if source and source.upper() != "SYSTEM":
             self.log_text.insert("end", f"[{source[:22]:<22s}] ", "SRC")
         self.log_text.insert("end", f"{message}\n", lvl_tag)
-        self.log_text.see("end")
+        if hasattr(self, "var_autoscroll") and self.var_autoscroll.get():
+            self.log_text.see("end")
         self.log_text.config(state="disabled")
 
     def _clear_logs(self):
@@ -305,7 +306,8 @@ class GUIDownloaderMixin:
             "concurrent_fragment_downloads": 4,
             "logger": YTLogger(
                 cb_info  = None,
-                cb_warn  = lambda m, j=job: (None if "JavaScript runtime" in m
+                cb_warn  = lambda m, j=job: (None if (getattr(self, "var_suppress_js", None) and self.var_suppress_js.get() and
+                                                      any(x in m.lower() for x in ["javascript runtime", "[jsc]", "n challenge", "deno process"]))
                                              else self.log(j.playlist_title, m, "WARNING")),
                 cb_err   = lambda m, j=job: self.log(j.playlist_title, m, "ERROR"),
                 cb_debug = _debug_hook,

@@ -396,7 +396,17 @@ class GUIBuilderMixin:
         hrow.pack(fill="x", pady=(0, 8))
         self._section_label(hrow, "ACTIVITY LOG").pack(side="left")
         self._small_btn(hrow, "Save Log…", self._save_log).pack(side="right", padx=(0,6))
-        self._small_btn(hrow, "Clear",      self._clear_logs).pack(side="right")
+        self._small_btn(hrow, "Clear",      self._clear_logs).pack(side="right", padx=(0, 10))
+        tk.Checkbutton(hrow, text="Auto-scroll", variable=self.var_autoscroll,
+                       bg=Theme.BG, fg=Theme.TEXT, selectcolor=Theme.BG,
+                       activebackground=Theme.BG, activeforeground=Theme.TEXT,
+                       font=("Helvetica Neue", 9), relief="flat", bd=0,
+                       highlightthickness=0).pack(side="right", padx=(0, 8))
+        tk.Checkbutton(hrow, text="Suppress JS Warn", variable=self.var_suppress_js,
+                       bg=Theme.BG, fg=Theme.TEXT, selectcolor=Theme.BG,
+                       activebackground=Theme.BG, activeforeground=Theme.TEXT,
+                       font=("Helvetica Neue", 9), relief="flat", bd=0,
+                       highlightthickness=0).pack(side="right", padx=(0, 16))
 
         log_card = tk.Frame(parent, bg=Theme.BG2)
         log_card.pack(fill="both", expand=True)
