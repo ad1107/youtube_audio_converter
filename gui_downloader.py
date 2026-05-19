@@ -313,6 +313,16 @@ class GUIDownloaderMixin:
             ),
         }
 
+        if getattr(self, "var_use_deno", None) and self.var_use_deno.get():
+            import ffmpeg_dl
+            deno_path = ffmpeg_dl.get_deno_path()
+            if deno_path:
+                ydl_opts["javascript_engines"] = [f"deno:{deno_path}"]
+                ydl_opts["remote_components"] = ["ejs:github"]
+                self.log(job.playlist_title, "Using Deno JS engine for remote components", "INFO")
+            else:
+                self.log(job.playlist_title, "Use Deno checked but Deno is not found! Falling back to default or please download Deno.", "WARNING")
+
         if cookiefile:
             ydl_opts["cookiefile"] = cookiefile
             self.log(job.playlist_title, f"Using cookies file: {cookiefile}", "INFO")

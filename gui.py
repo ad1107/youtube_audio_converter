@@ -49,6 +49,7 @@ class YoutubeAudioConverter(tk.Tk, GUIBuilderMixin, GUIDownloaderMixin):
         self.var_when_done     = tk.StringVar(value="Do nothing")
         self.var_cookiefile    = tk.StringVar(value="")
         self.var_cookies_browser = tk.StringVar(value="None")
+        self.var_use_deno      = tk.BooleanVar(value=False)
         # Bug 3 FIX: the old playlist/single-video checkbox has been removed.
         # URL type is auto-detected at download time (see gui_downloader.py).
         self.var_thumbnail     = tk.BooleanVar(value=True)
@@ -74,13 +75,24 @@ class YoutubeAudioConverter(tk.Tk, GUIBuilderMixin, GUIDownloaderMixin):
             if "ffmpeg"  in " ".join(missing): self.log("SYSTEM", "  https://ffmpeg.org",  "WARNING")
 
     def _check_dependencies(self):
-        missing = [] if get_ffmpeg_path() else ["ffmpeg (system)"]
+        import ffmpeg_dl
+        has_ffmpeg = bool(get_ffmpeg_path())
+        has_deno = bool(ffmpeg_dl.get_deno_path())
+
+        missing = []
+        if not has_ffmpeg: missing.append("ffmpeg")
+
+        status_text = f"✓ yt-dlp {YTDLP_VERSION}"
+        if has_ffmpeg:
+            status_text += "  ✓ ffmpeg"
+        if has_deno:
+            status_text += "  ✓ deno"
+
         if not missing:
-            self.lbl_dep_status.config(
-                text=f"✓ yt-dlp {YTDLP_VERSION}  ✓ ffmpeg", fg=Theme.GREEN)
+            self.lbl_dep_status.config(text=status_text, fg=Theme.GREEN)
         else:
             self.lbl_dep_status.config(text=f"⚠ Missing: {', '.join(missing)}", fg=Theme.YELLOW)
-            if "ffmpeg" in " ".join(missing):
+            if "ffmpeg" in missing:
                 self.btn_start.config(state="disabled")
 
     def log(self, source: str, message: str, level: str = "INFO"):

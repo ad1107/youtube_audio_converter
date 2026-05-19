@@ -304,6 +304,16 @@ class GUIBuilderMixin:
             width=14,
         ).pack(side="left")
 
+        def _download_deno_cmd():
+            import ffmpeg_dl
+            if ffmpeg_dl.download_deno_if_needed(self):
+                if hasattr(self, 'chk_use_deno'):
+                    self.chk_use_deno.config(state="normal")
+                if hasattr(self, '_check_dependencies'):
+                    self._check_dependencies()
+            
+        self._small_btn(r, "Download Deno", _download_deno_cmd).pack(side="right", padx=(4, 0))
+
         cb_frame = tk.Frame(body, bg=Theme.BG2)
         cb_frame.pack(fill="x", pady=(8,0))
         for i, (label, var) in enumerate([
@@ -319,6 +329,18 @@ class GUIBuilderMixin:
                            activeforeground=Theme.TEXT, font=("Helvetica Neue", 10),
                            bd=0, cursor="hand2", highlightthickness=0
                            ).grid(row=i//2, column=i%2, sticky="w", padx=(0,12), pady=1)
+
+        import ffmpeg_dl
+        deno_state = "normal" if ffmpeg_dl.get_deno_path() else "disabled"
+        if deno_state == "disabled":
+            self.var_use_deno.set(False)
+
+        self.chk_use_deno = tk.Checkbutton(cb_frame, text="Use Deno", variable=self.var_use_deno,
+                       bg=Theme.BG2, fg=Theme.TEXT, state=deno_state,
+                       selectcolor=Theme.BG3, activebackground=Theme.BG2,
+                       activeforeground=Theme.TEXT, font=("Helvetica Neue", 10),
+                       bd=0, cursor="hand2", highlightthickness=0)
+        self.chk_use_deno.grid(row=2, column=1, sticky="w", padx=(0,12), pady=1)
 
     # ── Progress Section ──────────────────────────────────────────────────────
 

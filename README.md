@@ -53,6 +53,12 @@ Single URL example:
 python main.py --cli --url "https://www.youtube.com/watch?v=wzE0qslqRAw" --format m4a --quality he_24
 ```
 
+Bypass YouTube blockers using Deno:
+
+```powershell
+python main.py --cli --url "https://www.youtube.com/watch?v=wzE0qslqRAw" --cookies-from-browser firefox --use-deno
+```
+
 Cookies support:
 
 ```powershell
@@ -78,7 +84,7 @@ python main.py --cli --url "https://www.youtube.com/watch?v=XmB3hWRszBs" --cooki
 - Apple-friendly formats M4A (AAC), MP3, FLAC, ALAC, WAV, AIFF.
 - HE-AAC 24kbps Mono - designed for extreme compression of voice and audiobooks (96kbps, 64kbps, 24kbps) natively via iTunes-compatible encoding.
 - Automatically prevents your PC from sleeping while downloads are running, and can optionally Sleep, Hibernate, or Shutdown when all jobs are complete.
-- **Auto-Fetching FFmpeg**: Bundles FFmpeg and yt-dlp correctly for Windows.
+- **Auto-Fetching FFmpeg & Deno**: Installs FFmpeg and Deno directly onto local configs to bypass YouTube's signature bot challenges using yt-dlp's remote plugin API (`ejs:github`).
 - CLI mode for batch downloads, single URLs, and cookie-based YouTube authentication.
 
 ## Requirements

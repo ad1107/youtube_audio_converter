@@ -9,7 +9,7 @@ from urllib.parse import parse_qs, urlparse
 
 import yt_dlp
 
-from ffmpeg_dl import get_ffmpeg_path
+from ffmpeg_dl import get_ffmpeg_path, get_deno_path
 from models_utils import FORMATS, QUALITIES, _fmt_duration, _normalize_cookiesfrombrowser
 
 
@@ -97,6 +97,8 @@ def build_parser():
     parser.add_argument("--no-metadata", action="store_true", help="Do not embed metadata")
     parser.add_argument("--no-track-num", action="store_true", help="Do not add track numbers")
     parser.add_argument("--no-skip-existing", action="store_true", help="Overwrite existing files")
+    parser.add_argument("--use-deno", action="store_true", help="Use Deno JS engine for remote components (mitigates YouTube blocks)")
+    parser.add_argument("--download-dependencies", nargs="+", choices=["ffmpeg", "deno", "all"], help="Automatically download missing dependencies")
     parser.add_argument("--verbose", action="store_true", help="Show verbose yt-dlp debug output")
     return parser
 
@@ -189,6 +191,16 @@ def _run_one(job: CliJob, args, logger: ConsoleLogger) -> bool:
         "logger": logger,
     }
 
+    if args.use_deno:
+        deno_path = get_deno_path()
+        if deno_path:
+            ydl_opts["javascript_engines"] = [f"deno:{deno_path}"]
+            ydl_opts["remote_components"] = ["ejs:github"]
+            print(f"[INFO] Using Deno JS engine for remote components")
+        else:
+            print("[WARNING] --use-deno specified but Deno is not found in bin/ or PATH. Ignoring.", file=sys.stderr)
+            print("[INFO] Run 'python main.py --download-dependencies deno' to install it automatically.", file=sys.stderr)
+
     if args.cookiefile:
         if not os.path.isfile(args.cookiefile):
             print(f"[ERROR] Cookies file not found: {args.cookiefile}", file=sys.stderr)
@@ -234,9 +246,22 @@ def _run_one(job: CliJob, args, logger: ConsoleLogger) -> bool:
 
 
 def run_cli(args) -> int:
+    if getattr(args, "download_dependencies", None):
+        from ffmpeg_dl import download_ffmpeg_if_needed, download_deno_if_needed
+        deps = args.download_dependencies
+        if "ffmpeg" in deps or "all" in deps:
+            print("[INFO] Checking/Downloading FFmpeg...")
+            download_ffmpeg_if_needed()
+        if "deno" in deps or "all" in deps:
+            print("[INFO] Checking/Downloading Deno...")
+            download_deno_if_needed()
+        print("[INFO] Dependency installation finished.")
+        return 0
+
     ffmpeg_path = get_ffmpeg_path()
     if not ffmpeg_path:
         print("[ERROR] ffmpeg was not found in PATH or the local bin folder.", file=sys.stderr)
+        print("[INFO] Run 'python main.py --download-dependencies ffmpeg' to install it automatically.", file=sys.stderr)
         return 1
 
     sources = _load_sources(args.url, args.input)

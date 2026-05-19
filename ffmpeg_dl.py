@@ -147,3 +147,90 @@ def download_ffmpeg_if_needed(parent=None):
         messagebox.showerror("FFmpeg Download Error", f"Failed to download FFmpeg:\n{e}", parent=popup)
         popup.destroy()
         return False
+
+def get_deno_path() -> str:
+    local_bin = get_local_bin_path()
+    local_deno = local_bin / "deno.exe" if sys.platform == "win32" else local_bin / "deno"
+    if local_deno.exists():
+        return str(local_deno)
+    sys_deno = shutil.which("deno")
+    if sys_deno:
+        return sys_deno
+    return ""
+
+def download_deno_if_needed(parent=None):
+    if get_deno_path():
+        return True
+    
+    local_bin = get_local_bin_path()
+    local_bin.mkdir(parents=True, exist_ok=True)
+
+    popup = tk.Toplevel(parent) if parent else tk.Tk()
+    popup.title("Downloading Deno")
+    popup.geometry("380x150")
+    if parent:
+        popup.transient(parent)
+    popup.grab_set()
+    popup.focus_force()
+
+    lbl_title = tk.Label(popup, text="Setting up Deno Environment...", font=("Helvetica Neue", 11, "bold"))
+    lbl_title.pack(pady=(15, 5))
+
+    progress = ttk.Progressbar(popup, orient="horizontal", length=300, mode="determinate")
+    progress.pack(pady=5)
+
+    lbl_status = tk.Label(popup, text="Starting download...", font=("Courier New", 9))
+    lbl_status.pack(pady=5)
+
+    start_time = [time.time()]
+
+    def reporthook(blocknum, blocksize, totalsize):
+        if blocknum == 0:
+            start_time[0] = time.time()
+            return
+        elapsed = time.time() - start_time[0]
+        current = blocknum * blocksize
+        pct = min(current * 100.0 / totalsize, 100) if totalsize > 0 else 0
+        
+        avg_speed = (current / elapsed) if elapsed > 0 else 0
+        
+        downloaded_mb = current / (1024 * 1024)
+        total_mb = totalsize / (1024 * 1024) if totalsize > 0 else 0
+        
+        if avg_speed >= 1024 * 1024:
+            speed_str = f"{avg_speed/(1024*1024):.1f} MB/s"
+        else:
+            speed_str = f"{avg_speed/1024:.1f} KB/s"
+            
+        lbl_status.config(text=f"{pct:.0f}% | {downloaded_mb:.1f}/{total_mb:.1f}MB | {speed_str}")
+        progress["value"] = pct
+        popup.update()
+
+    try:
+        popup.update()
+        import json
+
+        lbl_status.config(text="Resolving latest Deno build...")
+        popup.update()
+        
+        # Download the archive
+        archive_path = local_bin / "deno.zip"
+        url = "https://github.com/denoland/deno/releases/latest/download/deno-x86_64-pc-windows-msvc.zip"
+
+        urllib.request.urlretrieve(url, archive_path, reporthook)
+
+        # Extract deno.exe
+        lbl_status.config(text="Extracting archive...")
+        popup.update()
+        with zipfile.ZipFile(archive_path, 'r') as z:
+            z.extractall(local_bin)
+
+        archive_path.unlink(missing_ok=True)
+            
+        time.sleep(0.3)
+        popup.destroy()
+        return True
+    except Exception as e:
+        messagebox.showerror("Deno Download Error", f"Failed to download Deno:\n{e}", parent=popup)
+        popup.destroy()
+        return False

@@ -7,6 +7,8 @@ from ffmpeg_dl import download_ffmpeg_if_needed
 def _should_use_cli(args) -> bool:
     if args.gui:
         return False
+    if getattr(args, "download_dependencies", None):
+        return True
     if args.cli:
         return True
     return bool(args.url or args.input)
