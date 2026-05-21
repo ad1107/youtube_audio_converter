@@ -196,7 +196,7 @@ def _run_one(job: CliJob, args, logger: ConsoleLogger) -> bool:
     if args.use_deno:
         deno_path = get_deno_path()
         if deno_path:
-            ydl_opts["javascript_engines"] = [f"deno:{deno_path}"]
+            ydl_opts["js_runtimes"] = {"deno": {"path": deno_path}}
             ydl_opts["remote_components"] = ["ejs:github"]
             print(f"[INFO] Using Deno JS engine for remote components")
         else:

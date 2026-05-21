@@ -319,7 +319,7 @@ class GUIDownloaderMixin:
             import ffmpeg_dl
             deno_path = ffmpeg_dl.get_deno_path()
             if deno_path:
-                ydl_opts["javascript_engines"] = [f"deno:{deno_path}"]
+                ydl_opts["js_runtimes"] = {"deno": {"path": deno_path}}
                 ydl_opts["remote_components"] = ["ejs:github"]
                 self.log(job.playlist_title, "Using Deno JS engine for remote components", "INFO")
             else:

@@ -2,7 +2,7 @@
 """
 ╔═══════════════════════════════════════════════════════╗
 ║       AudioBook → Apple Music Converter               ║
-║  YouTube Playlists → M4A/MP3 with metadata & art     ║
+║  YouTube Playlists → M4A/MP3 with metadata & art      ║
 ╚═══════════════════════════════════════════════════════╝
 
 Usage:
