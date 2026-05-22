@@ -182,22 +182,25 @@ class GUIDownloaderMixin:
 
     def _on_job_metadata(self, job: PlaylistJob, title: str, total: int, output_folder: str):
         self.after(0, lambda j=job: self.lbl_current.config(text=f"{j.playlist_title}: queued {j.total_videos} item(s)"))
+        self._set_job_progress(job, status=f"0/{job.total_videos}")
         self._update_overall()
 
     def _on_item_queued(self, job: PlaylistJob, item, index: int):
         self.after(0, lambda j=job, it=item: self.lbl_current.config(text=f"{j.playlist_title}: queued {it.title[:52]}"))
+        self._set_active_progress(job, item, "download", 0, "Queued", f"Source: {item.url}")
 
     def _on_item_started(self, job: PlaylistJob, item, index: int):
         self.after(0, lambda j=job, it=item: self.lbl_current.config(text=f"{j.playlist_title}: {it.title[:52]}"))
-        self._set_active_progress(job, item, "download", 0, "Downloading 0%")
+        self._set_active_progress(job, item, "download", 0, "Downloading 0%", f"Source: {item.url}")
 
     def _on_item_skipped(self, job: PlaylistJob, item, path: str):
         self._update_overall()
+        self._mark_active_skipped(job, item, f"Existing file: {path}")
         self.after(0, lambda j=job, it=item: self.lbl_current.config(text=f"Skipped existing: {it.title[:52]}"))
 
     def _on_item_done(self, job: PlaylistJob, item, path: str):
         self._update_overall()
-        self._remove_active_progress(job, item)
+        self._mark_active_done(job, item, f"Saved: {path}")
         self.log(job.playlist_title, f"Saved: {item.title}", "SUCCESS")
 
     def _on_item_failed(self, job: PlaylistJob, item, failure):
@@ -217,7 +220,13 @@ class GUIDownloaderMixin:
             pct = downloaded / total * 100 if total else 0
             eta = data.get("eta")
             eta_text = f"ETA {eta}s" if eta is not None else ""
-            self._set_active_progress(job, item, "download", pct, f"Downloading {pct:0.0f}%")
+            detail = (
+                f"Downloading: {filename} | {downloaded / 1024 / 1024:0.1f} MB"
+                f"{f' / {total / 1024 / 1024:0.1f} MB' if total else ''}"
+                f" | {fmt_speed(data.get('speed'))}"
+                f"{f' | {eta_text}' if eta_text else ''} | Source: {item.url}"
+            )
+            self._set_active_progress(job, item, "download", pct, f"Downloading {pct:0.0f}%", detail)
 
             now = time.time()
             if now - getattr(job, "_last_prog_log", 0.0) > 1.5:
@@ -233,7 +242,7 @@ class GUIDownloaderMixin:
                 return
             item._download_finished_logged = True
             self.log(job.playlist_title, f"Download complete: {item.title}; post-processing...", "SUCCESS")
-            self._set_active_progress(job, item, "download", 100, "Downloaded")
+            self._set_active_progress(job, item, "download", 100, "Downloaded", f"Downloaded source: {item.url}")
         elif status == "error":
             self.log(job.playlist_title, f"Download error: {data.get('filename', item.title)}", "ERROR")
             self._mark_active_failed(job, item, "Download failed")
@@ -268,7 +277,14 @@ class GUIDownloaderMixin:
                     self.log(job.playlist_title, "Duration unknown; showing FFmpeg elapsed time.", "INFO")
                 self.after(0, lambda it=item, pt=job.playlist_title: self.lbl_current.config(
                     text=f"FFmpeg: {pt}: {it.title[:46]}"))
-                self._set_active_progress(job, item, "convert", 0, "Converting")
+                self._set_active_progress(
+                    job,
+                    item,
+                    "convert",
+                    0,
+                    "Converting",
+                    f"{label}: {item.expected_path}",
+                )
         elif status == "finished" and processor in {"ExtractAudio", "Merger", "VideoConvertor"}:
             self.log(job.playlist_title, f"{label} complete", "SUCCESS")
 
@@ -277,7 +293,15 @@ class GUIDownloaderMixin:
         expected = item.duration / effective_speed if item.duration and effective_speed > 0 else 0
         percent = min(progress.time_seconds / expected * 100, 99) if expected else None
         status = f"Converting {percent:0.0f}%" if percent is not None else f"Converting {fmt_duration(progress.time_seconds)}"
-        self._set_active_progress(job, item, "convert", percent, status)
+        detail = (
+            f"FFmpeg: elapsed {fmt_duration(progress.time_seconds)}"
+            f"{f' | {percent:0.0f}%' if percent is not None else ''}"
+            f"{f' | speed {progress.speed}' if progress.speed else ''}"
+            f"{f' | size {progress.size}' if progress.size else ''}"
+            f"{f' | bitrate {progress.bitrate}' if progress.bitrate else ''}"
+            f" | Output: {item.expected_path}"
+        )
+        self._set_active_progress(job, item, "convert", percent, status, detail)
 
         now = time.time()
         if now - getattr(job, "_last_ffmpeg_prog_log", 0.0) < 1.5:
@@ -304,6 +328,9 @@ class GUIDownloaderMixin:
         )
         if getattr(job, "output_folder", ""):
             self.log(job.playlist_title, f"-> {job.output_folder}", level)
+        style = "Error.Horizontal.TProgressbar" if has_error else "Green.Horizontal.TProgressbar"
+        status = "Error" if has_error else "Done"
+        self._set_job_progress(job, percent=100, status=status, style=style)
 
     def _update_overall(self):
         total = sum(job.total_videos for job in self.jobs)
@@ -312,6 +339,9 @@ class GUIDownloaderMixin:
             pct = done / total * 100
             self.after(0, lambda: self.pb_overall.configure(value=pct))
             self.after(0, lambda: self.lbl_progress_count.config(text=f"{done} / {total} files"))
+        for job in self.jobs:
+            if job.total_videos:
+                self._set_job_progress(job)
 
     def _on_all_finished(self):
         self.is_running = False
@@ -325,7 +355,6 @@ class GUIDownloaderMixin:
         self.after(0, lambda: self.btn_start.config(state="normal"))
         self.after(0, lambda: self.btn_stop.config(state="disabled"))
         self.after(0, lambda: self.lbl_current.config(text="Idle"))
-        self.after(1800, self._clear_active_progress)
 
         if cancelled:
             self.after(0, lambda: self.lbl_badge.config(text="CANCELLED", fg=Theme.YELLOW))
@@ -345,39 +374,3 @@ class GUIDownloaderMixin:
             when_done = getattr(self, "var_when_done", None)
             if when_done and when_done.get() != "Do nothing":
                 self._execute_power_action(when_done.get())
-
-    def _set_system_sleep_state(self, prevent: bool):
-        import platform
-
-        if platform.system() == "Windows":
-            import ctypes
-
-            es_continuous = 0x80000000
-            es_system_required = 0x00000001
-            if prevent:
-                ctypes.windll.kernel32.SetThreadExecutionState(es_continuous | es_system_required)
-            else:
-                ctypes.windll.kernel32.SetThreadExecutionState(es_continuous)
-
-    def _execute_power_action(self, action: str):
-        import platform
-
-        if platform.system() != "Windows":
-            self.log("SYSTEM", "Post-completion tasks are only supported on Windows.", "ERROR")
-            return
-
-        self.log("SYSTEM", f"Executing post-completion task: {action}", "WARNING")
-        time.sleep(2)
-
-        commands = {
-            "Shutdown": r"%windir%\System32\shutdown.exe -s -t 15",
-            "Reboot": r"%windir%\System32\shutdown.exe -r -t 15",
-            "Logoff": r"%windir%\System32\shutdown.exe -l -t 15",
-            "Sleep": r"%windir%\System32\rundll32.exe powrprof.dll,SetSuspendState 0,1,0",
-            "Hibernate": r"%windir%\System32\rundll32.exe powrprof.dll,SetSuspendState Hibernate",
-        }
-        command = commands.get(action)
-        if command:
-            os.system(command)
-        else:
-            self.log("SYSTEM", f"Unknown action: {action}", "ERROR")

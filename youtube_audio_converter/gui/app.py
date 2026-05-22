@@ -12,6 +12,7 @@ from .builder import GUIBuilderMixin
 from .downloader import GUIDownloaderMixin
 from .log_view import GUILogMixin
 from .models import FORMATS, QUALITIES, PlaylistJob, Theme, YTDLP_VERSION
+from .power import GUIPowerMixin
 from .progress import GUIProgressMixin
 from .settings import GUISettingsMixin
 
@@ -22,6 +23,7 @@ class YoutubeAudioConverter(
     GUISettingsMixin,
     GUIProgressMixin,
     GUILogMixin,
+    GUIPowerMixin,
     GUIDownloaderMixin,
 ):
     def __init__(self):
@@ -35,7 +37,8 @@ class YoutubeAudioConverter(
         self.is_running = False
         self.cancel_flag = threading.Event()
         self.playlist_row_widgets: list[tuple] = []
-        self.active_progress_widgets: dict[str, dict] = {}
+        self.job_progress_widgets: dict[int, dict] = {}
+        self.item_progress_widgets: dict[str, dict] = {}
 
         self.var_output_dir = tk.StringVar(value=str(Path.home() / "Music" / "AudioBooks"))
         self.var_format = tk.StringVar(value=list(FORMATS.keys())[0])

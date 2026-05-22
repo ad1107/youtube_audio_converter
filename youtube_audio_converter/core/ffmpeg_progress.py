@@ -129,12 +129,15 @@ def _run_ffmpeg_with_progress(self, input_path_opts, output_path_opts, expected_
 
     self.write_debug(f"ffmpeg command line: {yt_ffmpeg.shell_quote(cmd)}")
 
-    proc = subprocess.Popen(
-        cmd,
-        stdin=subprocess.PIPE,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE,
-    )
+    popen_kwargs = {
+        "stdin": subprocess.PIPE,
+        "stdout": subprocess.DEVNULL,
+        "stderr": subprocess.PIPE,
+    }
+    if os.name == "nt":
+        popen_kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+
+    proc = subprocess.Popen(cmd, **popen_kwargs)
     if proc.stdin:
         proc.stdin.close()
 

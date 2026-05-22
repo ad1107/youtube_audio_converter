@@ -65,9 +65,18 @@ class GUIBuilderMixin:
         left = tk.Frame(body, bg=Theme.BG, width=500)
         left.grid(row=0, column=0, sticky="nsew", padx=(0, 16))
         left.grid_propagate(False)
-        self._build_playlist_section(left)
-        self._build_output_section(left)
-        self._build_settings_section(left)
+        left.grid_columnconfigure(0, weight=1)
+        left.grid_rowconfigure(0, weight=1)
+
+        url_area = tk.Frame(left, bg=Theme.BG)
+        url_area.grid(row=0, column=0, sticky="nsew")
+        bottom_area = tk.Frame(left, bg=Theme.BG, height=500)
+        bottom_area.grid(row=1, column=0, sticky="ew")
+        bottom_area.grid_propagate(False)
+        bottom_area.pack_propagate(False)
+        self._build_playlist_section(url_area, expand=True)
+        self._build_output_section(bottom_area)
+        self._build_settings_section(bottom_area)
 
         right = tk.Frame(body, bg=Theme.BG)
         right.grid(row=0, column=1, sticky="nsew")
@@ -78,8 +87,8 @@ class GUIBuilderMixin:
         tk.Frame(self, bg=Theme.BORDER, height=1).pack(fill="x")
         self._build_bottom_bar()
 
-    def _build_playlist_section(self, parent):
-        card = self._card(parent, margin_bottom=10)
+    def _build_playlist_section(self, parent, expand=False):
+        card = self._card(parent, margin_bottom=10, fill="both" if expand else "x", expand=expand)
         header = tk.Frame(card, bg=Theme.BG2)
         header.pack(fill="x", padx=12, pady=(10, 6))
         self._section_label(header, "URLS").pack(side="left")
@@ -89,7 +98,7 @@ class GUIBuilderMixin:
         self._small_btn(header, "Clear All", self._clear_playlist_rows).pack(side="right", padx=(4, 0))
 
         list_outer = tk.Frame(card, bg=Theme.BG2)
-        list_outer.pack(fill="x", padx=12, pady=(0, 10))
+        list_outer.pack(fill="both" if expand else "x", expand=expand, padx=12, pady=(0, 10))
 
         self.playlist_canvas = tk.Canvas(list_outer, bg=Theme.BG2, highlightthickness=0, bd=0, height=170)
         scrollbar = ttk.Scrollbar(list_outer, orient="vertical", command=self.playlist_canvas.yview)

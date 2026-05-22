@@ -8,13 +8,23 @@ from .models import FORMATS, Theme
 
 class GUISettingsMixin:
     def _build_settings_section(self, parent):
-        card = self._card(parent, margin_bottom=10)
+        card = self._card(parent, margin_bottom=0, fill="both", expand=True)
         hrow = tk.Frame(card, bg=Theme.BG2, padx=12, pady=10)
         hrow.pack(fill="x")
         self._section_label(hrow, "SETTINGS").pack(anchor="w")
 
-        body = tk.Frame(card, bg=Theme.BG2, padx=12)
-        body.pack(fill="x", pady=(0, 8))
+        body_outer = tk.Frame(card, bg=Theme.BG2)
+        body_outer.pack(fill="both", expand=True, pady=(0, 8))
+        canvas = tk.Canvas(body_outer, bg=Theme.BG2, highlightthickness=0, bd=0)
+        scrollbar = ttk.Scrollbar(body_outer, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side="right", fill="y", padx=(0, 4))
+        canvas.pack(side="left", fill="both", expand=True)
+
+        body = tk.Frame(canvas, bg=Theme.BG2, padx=12)
+        body_window = canvas.create_window((0, 0), window=body, anchor="nw")
+        body.bind("<Configure>", lambda event: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.bind("<Configure>", lambda event: canvas.itemconfig(body_window, width=event.width))
         label_width = 15
 
         self._format_quality_rows(body, label_width)
