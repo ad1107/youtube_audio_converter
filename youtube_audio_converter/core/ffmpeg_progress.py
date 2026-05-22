@@ -23,6 +23,7 @@ class FFmpegProgress:
     speed: str = ""
     size: str = ""
     bitrate: str = ""
+    completed: bool = False
 
 
 _state = threading.local()
@@ -107,11 +108,16 @@ def _run_ffmpeg_with_progress(self, input_path_opts, output_path_opts, expected_
 
     cmd = [self.executable, yt_ffmpeg.encodeArgument("-y")]
     if self.basename == "ffmpeg":
-        cmd += [yt_ffmpeg.encodeArgument("-loglevel"), yt_ffmpeg.encodeArgument("repeat+info")]
+        cmd += [
+            yt_ffmpeg.encodeArgument("-hide_banner"),
+            yt_ffmpeg.encodeArgument("-nostdin"),
+            yt_ffmpeg.encodeArgument("-loglevel"),
+            yt_ffmpeg.encodeArgument("repeat+info"),
+        ]
 
     def make_args(file, args, name, number):
         keys = [f"_{name}{number}", f"_{name}"]
-        if name == "o":
+        if name == "o" and _should_faststart(file):
             args += ["-movflags", "+faststart"]
             if number == 1:
                 keys.append("")
@@ -144,6 +150,12 @@ def _run_ffmpeg_with_progress(self, input_path_opts, output_path_opts, expected_
     stderr_chunks: list[bytes] = []
     partial = ""
     decoder = _IncrementalDecoder()
+    last_progress: FFmpegProgress | None = None
+
+    def capture_progress(progress: FFmpegProgress) -> None:
+        nonlocal last_progress
+        last_progress = progress
+        callback(progress)
 
     assert proc.stderr is not None
     while True:
@@ -151,13 +163,13 @@ def _run_ffmpeg_with_progress(self, input_path_opts, output_path_opts, expected_
         if not chunk:
             break
         stderr_chunks.append(chunk)
-        partial = _consume_progress_text(partial + decoder.decode(chunk), callback)
+        partial = _consume_progress_text(partial + decoder.decode(chunk), capture_progress)
 
     tail = decoder.decode(b"", final=True)
     if tail:
-        partial = _consume_progress_text(partial + tail, callback)
+        partial = _consume_progress_text(partial + tail, capture_progress)
     if partial:
-        _emit_progress(partial, callback)
+        _emit_progress(partial, capture_progress)
 
     returncode = proc.wait()
     stderr = b"".join(stderr_chunks).decode("utf-8", errors="replace")
@@ -170,7 +182,24 @@ def _run_ffmpeg_with_progress(self, input_path_opts, output_path_opts, expected_
     for out_path, _ in output_path_opts:
         if out_path:
             self.try_utime(out_path, oldest_mtime, oldest_mtime)
+    if last_progress:
+        callback(
+            FFmpegProgress(
+                raw="ffmpeg complete",
+                time_seconds=last_progress.time_seconds,
+                time_text=last_progress.time_text,
+                speed=last_progress.speed,
+                size=last_progress.size,
+                bitrate=last_progress.bitrate,
+                completed=True,
+            )
+        )
     return stderr
+
+
+def _should_faststart(output_path: str) -> bool:
+    ext = os.path.splitext(str(output_path or ""))[1].lower()
+    return ext in {".mp4", ".mov"}
 
 
 class _IncrementalDecoder:

@@ -289,6 +289,17 @@ class GUIDownloaderMixin:
             self.log(job.playlist_title, f"{label} complete", "SUCCESS")
 
     def _ffmpeg_progress_hook(self, job: PlaylistJob, item, progress):
+        if getattr(progress, "completed", False):
+            self._set_active_progress(
+                job,
+                item,
+                "convert",
+                100,
+                "Finalizing",
+                f"FFmpeg complete; finalizing output: {item.expected_path}",
+            )
+            return
+
         effective_speed = job.speed if supports_audio_filters(job.fmt) else 1.0
         expected = item.duration / effective_speed if item.duration and effective_speed > 0 else 0
         percent = min(progress.time_seconds / expected * 100, 99) if expected else None

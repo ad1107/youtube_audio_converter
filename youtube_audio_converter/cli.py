@@ -211,6 +211,13 @@ def _run_cli_job(
             reporter.log(active_job.playlist_title, f"Download complete: {item.title}", "SUCCESS")
 
     def on_ffmpeg_progress(active_job, item, progress):
+        if getattr(progress, "completed", False):
+            if getattr(item, "_ffmpeg_complete_logged", False):
+                return
+            item._ffmpeg_complete_logged = True
+            reporter.log(active_job.playlist_title, f"FFmpeg complete; finalizing: {item.title}", "PROGRESS")
+            return
+
         now = time.time()
         if now - getattr(active_job, "_last_ffmpeg_prog_log", 0.0) < 2.0:
             return
