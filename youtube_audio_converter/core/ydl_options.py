@@ -1,7 +1,6 @@
 from ..dependencies import get_deno_path
 from .cookies import normalize_cookiesfrombrowser
-from .formats import get_format_spec, ydl_format_selector
-from .media import final_audio_ext
+from .formats import final_output_ext, get_format_spec, ydl_format_selector
 from .yt_logger import YTLogger
 
 
@@ -27,7 +26,7 @@ def build_ydl_options(
         "color": "no_color",
         "overwrites": not settings.skip_existing,
         "nooverwrites": settings.skip_existing,
-        "final_ext": final_audio_ext(settings.fmt),
+        "final_ext": final_output_ext(settings.fmt),
         "concurrent_fragment_downloads": 4,
         "logger": logger,
     }

@@ -25,10 +25,6 @@ def ensure_audio_codec_support() -> None:
         )
 
 
-def final_audio_ext(fmt: str) -> str:
-    return final_output_ext(fmt)
-
-
 def safe_folder_name(value: str, fallback: str = "YouTube Audio") -> str:
     cleaned = sanitize_filename((value or "").strip(), restricted=False).strip(" .")
     return cleaned or fallback

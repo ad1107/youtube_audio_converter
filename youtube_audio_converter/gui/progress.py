@@ -85,9 +85,6 @@ class GUIProgressMixin:
 
         self.after(0, apply)
 
-    def _remove_active_progress(self, job, item, delay_ms: int = 700):
-        self._mark_active_done(job, item, f"Saved: {item.expected_path}")
-
     def _mark_active_failed(self, job, item, status: str):
         if item is None:
             return

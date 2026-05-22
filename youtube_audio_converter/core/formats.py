@@ -196,10 +196,6 @@ def get_format_spec(fmt: str) -> FormatSpec:
     return FORMAT_SPECS.get(str(fmt or "").lower(), FORMAT_SPECS["m4a"])
 
 
-def is_video_format(fmt: str) -> bool:
-    return get_format_spec(fmt).media_kind == "video"
-
-
 def final_output_ext(fmt: str) -> str:
     return get_format_spec(fmt).final_ext
 
@@ -212,10 +208,6 @@ def supports_audio_filters(fmt: str) -> bool:
     return get_format_spec(fmt).supports_audio_filters
 
 
-def default_quality_value(fmt: str) -> str:
-    return get_format_spec(fmt).default_quality.value
-
-
 def quality_options_for_format(fmt: str) -> tuple[QualityOption, ...]:
     return get_format_spec(fmt).quality_options
 
@@ -226,11 +218,6 @@ def quality_label_map(fmt: str) -> dict[str, str]:
 
 def quality_labels_for_format(fmt: str) -> list[str]:
     return [option.label for option in quality_options_for_format(fmt)]
-
-
-def quality_label_for_value(fmt: str, quality: str | None) -> str:
-    option = get_quality_option(fmt, quality)
-    return option.label
 
 
 def get_quality_option(fmt: str, quality: str | None) -> QualityOption:
@@ -249,21 +236,26 @@ def normalize_quality(fmt: str, quality: str | None) -> str:
     raw = str(quality).strip()
     lowered = raw.lower().replace("kbps", "").strip()
     lowered = lowered.removesuffix("p").strip() if lowered[:-1].isdigit() else lowered
+    compact = raw.lower().replace(" ", "")
 
     if spec.lossless and lowered in {"best", "0"}:
         return spec.default_quality.value
 
     for option in spec.quality_options:
+        label = option.label.lower()
         candidates = {
             option.value.lower(),
-            option.label.lower(),
+            label,
+            label.replace(" ", ""),
+            label.replace("kbps", "").strip(),
+            label.replace("kbps", "").replace(" ", ""),
         }
         if option.ffmpeg_quality:
             candidates.add(option.ffmpeg_quality.lower())
         if option.height:
             candidates.add(str(option.height))
             candidates.add(f"{option.height}p")
-        if lowered in candidates or raw.lower() in candidates:
+        if lowered in candidates or raw.lower() in candidates or compact in candidates:
             return option.value
 
     values = ", ".join(option.value for option in spec.quality_options)
@@ -273,8 +265,6 @@ def normalize_quality(fmt: str, quality: str | None) -> str:
 def format_quality_summary(fmt: str, quality: str | None) -> str:
     spec = get_format_spec(fmt)
     option = get_quality_option(fmt, quality)
-    if spec.media_kind == "video":
-        return f"{spec.label} @ {option.label}"
     return f"{spec.label} @ {option.label}"
 
 

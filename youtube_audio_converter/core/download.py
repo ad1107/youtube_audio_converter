@@ -271,6 +271,7 @@ def _download_item(job, item: DownloadItem, settings: DownloadSettings, callback
 
         if last_error:
             callbacks.log(job.playlist_title, f"{item.title}: {last_error}", "ERROR")
+            _remove_partial_output(item, callbacks, job)
 
     return False
 
@@ -283,6 +284,16 @@ def _download_progress(callbacks: DownloadCallbacks, job, item: DownloadItem, da
 
 def _item_output_exists(item: DownloadItem) -> bool:
     return bool(item.expected_path and os.path.isfile(item.expected_path) and os.path.getsize(item.expected_path) > 0)
+
+
+def _remove_partial_output(item: DownloadItem, callbacks: DownloadCallbacks, job) -> None:
+    if not item.expected_path or not os.path.isfile(item.expected_path):
+        return
+    try:
+        os.remove(item.expected_path)
+        callbacks.log(job.playlist_title, f"Removed partial output before retry: {item.title}", "WARNING")
+    except OSError as exc:
+        callbacks.log(job.playlist_title, f"Could not remove partial output for retry: {exc}", "WARNING")
 
 
 def _make_item(entry: dict, job, settings: DownloadSettings, index: int, is_playlist: bool) -> DownloadItem:

@@ -3,9 +3,11 @@ from __future__ import annotations
 import contextlib
 import itertools
 import os
+import queue
 import re
 import subprocess
 import threading
+import time
 from dataclasses import dataclass
 from typing import Callable
 
@@ -31,6 +33,7 @@ _install_lock = threading.Lock()
 _installed = False
 _original_real_run = yt_ffmpeg.FFmpegPostProcessor.real_run_ffmpeg
 _FIELD_RE = re.compile(r"(?P<key>frame|fps|q|size|time|bitrate|speed)\s*=\s*(?P<value>[^\s\r\n]+)")
+_STALL_TIMEOUT_SECONDS = 300.0
 
 
 def install_ffmpeg_progress_patch() -> None:
@@ -147,24 +150,54 @@ def _run_ffmpeg_with_progress(self, input_path_opts, output_path_opts, expected_
     if proc.stdin:
         proc.stdin.close()
 
+    assert proc.stderr is not None
+    stderr_queue: queue.Queue[bytes | None] = queue.Queue()
+    reader = threading.Thread(target=_read_stderr, args=(proc.stderr, stderr_queue), daemon=True)
+    reader.start()
+
     stderr_chunks: list[bytes] = []
     partial = ""
     decoder = _IncrementalDecoder()
     last_progress: FFmpegProgress | None = None
+    last_output_time = time.monotonic()
+    last_progress_time = last_output_time
+    last_progress_seconds = 0.0
+    stalled = False
+    stall_reason = ""
 
     def capture_progress(progress: FFmpegProgress) -> None:
-        nonlocal last_progress
+        nonlocal last_progress, last_progress_seconds, last_progress_time
         last_progress = progress
+        if progress.time_seconds > last_progress_seconds + 0.01:
+            last_progress_seconds = progress.time_seconds
+            last_progress_time = time.monotonic()
         callback(progress)
 
-    assert proc.stderr is not None
     while True:
-        chunk = proc.stderr.read(1024)
-        if not chunk:
+        try:
+            chunk = stderr_queue.get(timeout=1.0)
+        except queue.Empty:
+            if proc.poll() is not None and not reader.is_alive():
+                break
+            if time.monotonic() - last_output_time > _STALL_TIMEOUT_SECONDS:
+                stalled = True
+                stall_reason = f"no stderr output for {_STALL_TIMEOUT_SECONDS:g}s"
+                proc.kill()
+                break
+            continue
+
+        if chunk is None:
             break
+        last_output_time = time.monotonic()
         stderr_chunks.append(chunk)
         partial = _consume_progress_text(partial + decoder.decode(chunk), capture_progress)
+        if last_progress and time.monotonic() - last_progress_time > _STALL_TIMEOUT_SECONDS:
+            stalled = True
+            stall_reason = f"no media-time progress for {_STALL_TIMEOUT_SECONDS:g}s"
+            proc.kill()
+            break
 
+    reader.join(timeout=2.0)
     tail = decoder.decode(b"", final=True)
     if tail:
         partial = _consume_progress_text(partial + tail, capture_progress)
@@ -173,6 +206,10 @@ def _run_ffmpeg_with_progress(self, input_path_opts, output_path_opts, expected_
 
     returncode = proc.wait()
     stderr = b"".join(stderr_chunks).decode("utf-8", errors="replace")
+
+    if stalled:
+        self.write_debug(stderr)
+        raise yt_ffmpeg.FFmpegPostProcessorError(f"ffmpeg stalled: {stall_reason}")
 
     if returncode not in yt_ffmpeg.variadic(expected_retcodes):
         self.write_debug(stderr)
@@ -200,6 +237,17 @@ def _run_ffmpeg_with_progress(self, input_path_opts, output_path_opts, expected_
 def _should_faststart(output_path: str) -> bool:
     ext = os.path.splitext(str(output_path or ""))[1].lower()
     return ext in {".mp4", ".mov"}
+
+
+def _read_stderr(stream, stderr_queue: queue.Queue[bytes | None]) -> None:
+    try:
+        while True:
+            chunk = os.read(stream.fileno(), 4096)
+            if not chunk:
+                break
+            stderr_queue.put(chunk)
+    finally:
+        stderr_queue.put(None)
 
 
 class _IncrementalDecoder:

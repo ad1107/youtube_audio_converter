@@ -208,8 +208,6 @@ def download_deno_if_needed(parent=None):
 
     try:
         popup.update()
-        import json
-
         lbl_status.config(text="Resolving latest Deno build...")
         popup.update()
         
