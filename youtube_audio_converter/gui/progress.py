@@ -180,7 +180,7 @@ class GUIProgressMixin:
             text=f"Source: {item.url}",
             bg=Theme.BG2,
             fg=Theme.MUTED,
-            font=("Courier New", 12),
+            font=("Courier New", 8),
             anchor="w",
             justify="left",
             wraplength=640,
