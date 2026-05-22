@@ -3,8 +3,8 @@ import sys
 import subprocess
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
-from pathlib import Path
-from models_utils import FORMATS, QUALITIES, Theme, LOG_COLOURS
+from youtube_audio_converter import dependencies
+from .models import FORMATS, LOG_COLOURS, QUALITIES, Theme
 
 class GUIBuilderMixin:
 
@@ -75,7 +75,7 @@ class GUIBuilderMixin:
         self._small_btn(hrow, "+ Add Row",  self._add_playlist_row).pack(side="right", padx=(4,0))
         self._small_btn(hrow, "Import TXT", self._import_txt).pack(side="right", padx=(4,0))
         self._small_btn(hrow, "Paste URLs", self._paste_urls).pack(side="right", padx=(4,0))
-        self._small_btn(hrow, "Clear All",  self._clear_playlist_rows).pack(side="right")
+        self._small_btn(hrow, "Clear All",  self._clear_playlist_rows).pack(side="right", padx=(4,0))
 
         list_outer = tk.Frame(card, bg=Theme.BG2)
         list_outer.pack(fill="x", padx=12, pady=(0, 10))
@@ -133,14 +133,13 @@ class GUIBuilderMixin:
                 children[0].config(text=f"{i+1:02d}")
 
     def _import_txt(self):
-        from tkinter import filedialog, messagebox
         filename = filedialog.askopenfilename(
             title="Select Source TXT File",
             filetypes=[("Text Files", "*.txt"), ("All Files", "*.*")]
         )
         if not filename:
             return
-            
+
         try:
             with open(filename, "r", encoding="utf-8") as f:
                 text = f.read()
@@ -156,23 +155,15 @@ class GUIBuilderMixin:
         self._add_lines_to_rows(text)
 
     def _add_lines_to_rows(self, text: str):
-        urls = [u.strip() for u in text.splitlines() if u.strip()]
-        if not urls:
+        lines = [u.strip() for u in text.splitlines() if u.strip()]
+        if not lines:
             return
         empty = [e for _, e in self.playlist_row_widgets if not e.get().strip()]
-        for i, url in enumerate(urls):
-            # Parse possible "FolderName | https..." format
-            folder = ""
-            if "|" in url:
-                parts = url.split("|", 1)
-                folder, url = parts[0].strip(), parts[1].strip()
-                
-            if i < len(empty) and not folder:
-                empty[i].delete(0, "end"); empty[i].insert(0, url)
+        for i, line in enumerate(lines):
+            if i < len(empty):
+                empty[i].delete(0, "end"); empty[i].insert(0, line)
             else:
-                self._add_playlist_row(url_text=url)
-                # Note: Currently _add_playlist_row only accepts url_text, so manual folder overriding
-                # isn't explicitly supported in the GUI builder row method yet. We will just add the url.
+                self._add_playlist_row(url_text=line)
 
     def _clear_playlist_rows(self):
         for row, _ in self.playlist_row_widgets:
@@ -255,7 +246,7 @@ class GUIBuilderMixin:
                 self.cb_quality.config(state="disabled")
             else:
                 self.cb_quality.config(state="readonly")
-        
+
         self.var_format.trace_add("write", _on_format_change)
         # initial trigger
         _on_format_change()
@@ -305,13 +296,12 @@ class GUIBuilderMixin:
         ).pack(side="left")
 
         def _download_deno_cmd():
-            import ffmpeg_dl
-            if ffmpeg_dl.download_deno_if_needed(self):
+            if dependencies.download_deno_if_needed(self):
                 if hasattr(self, 'chk_use_deno'):
                     self.chk_use_deno.config(state="normal")
                 if hasattr(self, '_check_dependencies'):
                     self._check_dependencies()
-            
+
         self._small_btn(r, "Download Deno", _download_deno_cmd).pack(side="right", padx=(4, 0))
 
         cb_frame = tk.Frame(body, bg=Theme.BG2)
@@ -330,8 +320,7 @@ class GUIBuilderMixin:
                            bd=0, cursor="hand2", highlightthickness=0
                            ).grid(row=i//2, column=i%2, sticky="w", padx=(0,12), pady=1)
 
-        import ffmpeg_dl
-        deno_state = "normal" if ffmpeg_dl.get_deno_path() else "disabled"
+        deno_state = "normal" if dependencies.get_deno_path() else "disabled"
         if deno_state == "disabled":
             self.var_use_deno.set(False)
 
@@ -367,22 +356,22 @@ class GUIBuilderMixin:
         # Add scrollbar to the progress bars list
         progress_container = tk.Frame(card, bg=Theme.BG2, padx=12)
         progress_container.pack(fill="both", expand=True, pady=(0, 10))
-        
+
         self.progress_canvas = tk.Canvas(progress_container, bg=Theme.BG2, highlightthickness=0, height=200)
         self.progress_scrollbar = ttk.Scrollbar(progress_container, orient="vertical", command=self.progress_canvas.yview)
-        
+
         self.playlist_progress_frame = tk.Frame(self.progress_canvas, bg=Theme.BG2)
-        
+
         self.playlist_progress_frame.bind(
             "<Configure>",
             lambda e: self.progress_canvas.configure(scrollregion=self.progress_canvas.bbox("all"))
         )
         self.progress_canvas_window = self.progress_canvas.create_window((0, 0), window=self.playlist_progress_frame, anchor="nw")
-        
+
         self.progress_canvas.pack(side="left", fill="both", expand=True)
         self.progress_scrollbar.pack(side="right", fill="y")
         self.progress_canvas.configure(yscrollcommand=self.progress_scrollbar.set)
-        
+
         # Bind canvas resize to update inner frame width
         self.progress_canvas.bind(
             "<Configure>",
@@ -396,7 +385,9 @@ class GUIBuilderMixin:
         hrow.pack(fill="x", pady=(0, 8))
         self._section_label(hrow, "ACTIVITY LOG").pack(side="left")
         self._small_btn(hrow, "Save Log…", self._save_log).pack(side="right", padx=(0,6))
-        self._small_btn(hrow, "Clear",      self._clear_logs).pack(side="right", padx=(0, 10))
+        self._small_btn(hrow, "Clear",      self._clear_logs).pack(side="right", padx=(0, 6))
+        self._small_btn(hrow, "Retry Errors", self._retry_errors).pack(side="right", padx=(0, 10))
+
         tk.Checkbutton(hrow, text="Auto-scroll", variable=self.var_autoscroll,
                        bg=Theme.BG, fg=Theme.TEXT, selectcolor=Theme.BG,
                        activebackground=Theme.BG, activeforeground=Theme.TEXT,
@@ -441,7 +432,7 @@ class GUIBuilderMixin:
                                    relief="flat", bd=0, padx=22, pady=8,
                                    cursor="hand2", command=self._stop, state="disabled")
         self.btn_stop.pack(side="left", padx=(8,0))
-        
+
         # When done dropdown
         frame_when_done = tk.Frame(bar, bg=Theme.BG)
         frame_when_done.pack(side="left", padx=(20, 0))
@@ -453,7 +444,7 @@ class GUIBuilderMixin:
         self.lbl_dep_status = tk.Label(bar, text="", bg=Theme.BG, fg=Theme.MUTED,
                                         font=("Courier New", 9))
         self.lbl_dep_status.pack(side="right")
-        
+
         lbl_made_by = tk.Label(bar, text="made by ad1107", bg=Theme.BG, fg=Theme.MUTED, font=("Courier New", 9))
         lbl_made_by.pack(side="right", padx=(0, 15))
     def _card(self, parent, margin_bottom=0):

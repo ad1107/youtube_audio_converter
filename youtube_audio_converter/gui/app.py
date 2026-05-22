@@ -15,16 +15,16 @@ from datetime import datetime
 from pathlib import Path
 import tkinter as tk
 
-from __init__ import __version__
+from youtube_audio_converter import __version__
 # Single source of truth for shared state, constants and dependency checks
-from models_utils import (
+from youtube_audio_converter.dependencies import get_deno_path, get_ffmpeg_path
+from .models import (
     YTDLP_VERSION,
     FORMATS, QUALITIES, Theme,
     PlaylistJob,
-    get_ffmpeg_path,
 )
-from gui_builder import GUIBuilderMixin
-from gui_downloader import GUIDownloaderMixin
+from .builder import GUIBuilderMixin
+from .downloader import GUIDownloaderMixin
 
 
 class YoutubeAudioConverter(tk.Tk, GUIBuilderMixin, GUIDownloaderMixin):
@@ -53,7 +53,7 @@ class YoutubeAudioConverter(tk.Tk, GUIBuilderMixin, GUIDownloaderMixin):
         self.var_autoscroll    = tk.BooleanVar(value=True)
         self.var_suppress_js   = tk.BooleanVar(value=True)
         # Bug 3 FIX: the old playlist/single-video checkbox has been removed.
-        # URL type is auto-detected at download time (see gui_downloader.py).
+        # URL type is auto-detected at download time.
         self.var_thumbnail     = tk.BooleanVar(value=True)
         self.var_crop_thumb    = tk.BooleanVar(value=True)
         self.var_metadata      = tk.BooleanVar(value=True)
@@ -77,9 +77,8 @@ class YoutubeAudioConverter(tk.Tk, GUIBuilderMixin, GUIDownloaderMixin):
             if "ffmpeg"  in " ".join(missing): self.log("SYSTEM", "  https://ffmpeg.org",  "WARNING")
 
     def _check_dependencies(self):
-        import ffmpeg_dl
         has_ffmpeg = bool(get_ffmpeg_path())
-        has_deno = bool(ffmpeg_dl.get_deno_path())
+        has_deno = bool(get_deno_path())
 
         missing = []
         if not has_ffmpeg: missing.append("ffmpeg")

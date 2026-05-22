@@ -13,7 +13,7 @@ def get_local_bin_path() -> Path:
         # Running inside PyInstaller / compiled context
         # Put it strictly in a "bin" folder right next to the .exe file
         return Path(sys.executable).parent / "bin"
-    return Path(__file__).parent / "bin"
+    return Path(__file__).resolve().parent.parent / "bin"
 
 def get_ffmpeg_path() -> str:
     sys_ffmpeg = shutil.which("ffmpeg")

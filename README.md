@@ -41,6 +41,12 @@ If you omit the folder name, the app uses the playlist title when it can, or a s
 python main.py
 ```
 
+or:
+
+```powershell
+python -m youtube_audio_converter
+```
+
 ## Run from the CLI
 
 ```powershell
@@ -83,6 +89,14 @@ or:
 ```powershell
 python main.py --cli --url "https://www.youtube.com/watch?v=XmB3hWRszBs" --cookiefile C:\\path\\to\\cookies.txt
 ```
+
+## Project layout
+
+- `main.py` is a thin compatibility launcher; `youtube_audio_converter/entrypoint.py` owns GUI/CLI selection.
+- `youtube_audio_converter/cli.py` handles command-line execution.
+- `youtube_audio_converter/gui/` contains the Tkinter app, layout, progress UI, and GUI state.
+- `youtube_audio_converter/core/` contains shared download, output-path, FFmpeg progress, cookie, URL, and formatting logic used by both GUI and CLI.
+- `youtube_audio_converter/dependencies.py` handles local FFmpeg and Deno discovery/download.
 
 ## Features
 

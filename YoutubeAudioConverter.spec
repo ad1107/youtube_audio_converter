@@ -1,12 +1,14 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+from PyInstaller.utils.hooks import collect_submodules
+
 
 a = Analysis(
     ['main.py'],
     pathex=['.'],
     binaries=[],
     datas=[],
-    hiddenimports=['yt_dlp', 'gui', 'ffmpeg_dl', 'models_utils', 'gui_builder', 'gui_downloader'],
+    hiddenimports=['yt_dlp', *collect_submodules('youtube_audio_converter')],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

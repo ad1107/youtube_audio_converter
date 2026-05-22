@@ -1,4 +1,4 @@
-from youtube_audio_converter.entrypoint import main
+from .entrypoint import main
 
 
 if __name__ == "__main__":
