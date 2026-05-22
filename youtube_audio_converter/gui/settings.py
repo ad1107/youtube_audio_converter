@@ -2,7 +2,8 @@ import tkinter as tk
 from tkinter import ttk
 
 from youtube_audio_converter import dependencies
-from .models import FORMATS, QUALITIES, Theme
+from youtube_audio_converter.core.formats import quality_labels_for_format, supports_audio_filters
+from .models import FORMATS, Theme
 
 
 class GUISettingsMixin:
@@ -24,20 +25,21 @@ class GUISettingsMixin:
 
     def _format_quality_rows(self, parent, label_width: int):
         row = self._settings_row(parent, "Format", label_width)
-        ttk.Combobox(
+        self.cb_format = ttk.Combobox(
             row,
             textvariable=self.var_format,
             values=list(FORMATS.keys()),
             state="readonly",
             font=("Helvetica Neue", 10),
             width=30,
-        ).pack(side="left")
+        )
+        self.cb_format.pack(side="left")
 
         row = self._settings_row(parent, "Quality", label_width)
         self.cb_quality = ttk.Combobox(
             row,
             textvariable=self.var_quality,
-            values=list(QUALITIES.keys()),
+            values=quality_labels_for_format(FORMATS.get(self.var_format.get(), "m4a")),
             state="readonly",
             font=("Helvetica Neue", 10),
             width=22,
@@ -46,35 +48,50 @@ class GUISettingsMixin:
 
         def on_format_change(*args):
             fmt_code = FORMATS.get(self.var_format.get(), "m4a")
-            self.cb_quality.config(state="disabled" if fmt_code in ["flac", "wav", "alac", "aiff"] else "readonly")
+            quality_labels = quality_labels_for_format(fmt_code)
+            self.cb_quality.config(values=quality_labels)
+            if self.var_quality.get() not in quality_labels:
+                self.var_quality.set(quality_labels[0])
+            self.cb_quality.config(state="disabled" if len(quality_labels) == 1 else "readonly")
+
+            audio_state = "readonly" if supports_audio_filters(fmt_code) else "disabled"
+            volume_state = "normal" if supports_audio_filters(fmt_code) else "disabled"
+            if hasattr(self, "cb_speed"):
+                self.cb_speed.config(state=audio_state)
+            if hasattr(self, "entry_volume"):
+                self.entry_volume.config(state=volume_state)
 
         self.var_format.trace_add("write", on_format_change)
         on_format_change()
 
     def _audio_adjustment_rows(self, parent, label_width: int):
         row = self._settings_row(parent, "Playback Speed", label_width)
-        ttk.Combobox(
+        self.cb_speed = ttk.Combobox(
             row,
             textvariable=self.var_speed,
             values=[0.5, 0.75, 1.0, 1.1, 1.25, 1.3, 1.5, 1.75, 2.0],
             state="readonly",
             font=("Helvetica Neue", 10),
             width=8,
-        ).pack(side="left")
+        )
+        self.cb_speed.pack(side="left")
         self._muted_note(row, "x (Retains pitch, 1.0=Normal)")
 
         row = self._settings_row(parent, "Volume", label_width)
-        tk.Entry(
+        self.entry_volume = tk.Entry(
             row,
             textvariable=self.var_volume,
             bg=Theme.BG3,
             fg=Theme.TEXT,
+            disabledbackground=Theme.BG3,
+            disabledforeground=Theme.MUTED,
             relief="flat",
             bd=0,
             font=("Courier New", 10),
             insertbackground=Theme.TEXT,
             width=8,
-        ).pack(side="left", ipady=4)
+        )
+        self.entry_volume.pack(side="left", ipady=4)
         self._muted_note(row, "x (FFmpeg volume filter)")
 
     def _concurrency_rows(self, parent, label_width: int):

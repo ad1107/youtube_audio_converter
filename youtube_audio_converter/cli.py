@@ -6,11 +6,12 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from .core.download import DownloadCallbacks, DownloadSettings, run_download_job
+from .core.formats import FORMAT_SPECS, format_codes, normalize_quality, quality_options_for_format
 from .core.formatting import fmt_duration, fmt_speed
 from .core.runtime import DownloadRuntime
 from .core.urls import load_sources
 from .dependencies import get_deno_path, get_ffmpeg_path
-from .gui.models import FORMATS, PlaylistJob
+from .gui.models import PlaylistJob
 
 
 class ConsoleReporter:
@@ -31,16 +32,16 @@ class ConsoleReporter:
 
 
 def build_parser():
-    parser = argparse.ArgumentParser(description="YouTube audiobook downloader and converter")
+    parser = argparse.ArgumentParser(description="YouTube audio/video downloader and converter", allow_abbrev=False)
     parser.add_argument("--cli", action="store_true", help="Run in CLI mode")
     parser.add_argument("--gui", action="store_true", help="Force GUI mode")
+    parser.add_argument("--list-formats", action="store_true", help="Show supported formats and format-specific quality values")
     parser.add_argument("--url", action="append", default=[], help="YouTube URL to download (repeatable)")
     parser.add_argument("--input", action="append", default=[], help="Text file with one URL per line")
     parser.add_argument("--output", default=str(Path.home() / "Music" / "AudioBooks"), help="Output folder")
-    parser.add_argument("--format", choices={v for v in FORMATS.values()}, default="m4a", help="Output format")
-    parser.add_argument("--quality", default="0", help="Audio quality or HE-AAC preset value")
+    parser.add_argument("--format", choices=format_codes(), default="m4a", help="Output format")
+    parser.add_argument("--quality", default=None, help="Format-specific quality value; omit for that format's default")
     parser.add_argument("--speed", type=float, default=1.0, help="Playback speed, e.g. 1.3")
-    parser.add_argument("--concurrent", type=int, default=None, help="Compatibility alias for --concurrent-downloads")
     parser.add_argument("--concurrent-downloads", type=int, default=2, help="Concurrent track downloads")
     parser.add_argument("--concurrent-converts", type=int, default=1, help="Concurrent FFmpeg conversions")
     parser.add_argument("--download-start-delay", type=float, default=10.0, help="Seconds to wait before starting the next download")
@@ -59,6 +60,10 @@ def build_parser():
 
 
 def run_cli(args) -> int:
+    if getattr(args, "list_formats", False):
+        _print_format_table()
+        return 0
+
     if getattr(args, "download_dependencies", None):
         from .dependencies import download_deno_if_needed, download_ffmpeg_if_needed
 
@@ -87,6 +92,25 @@ def run_cli(args) -> int:
     if args.volume <= 0:
         print("[ERROR] --volume must be greater than 0.", file=sys.stderr)
         return 1
+    if args.speed <= 0:
+        print("[ERROR] --speed must be greater than 0.", file=sys.stderr)
+        return 1
+    if args.concurrent_downloads <= 0:
+        print("[ERROR] --concurrent-downloads must be greater than 0.", file=sys.stderr)
+        return 1
+    if args.concurrent_converts <= 0:
+        print("[ERROR] --concurrent-converts must be greater than 0.", file=sys.stderr)
+        return 1
+    if args.download_start_delay < 0:
+        print("[ERROR] --download-start-delay must be 0 or greater.", file=sys.stderr)
+        return 1
+    try:
+        args.quality = normalize_quality(args.format, args.quality)
+    except ValueError as exc:
+        valid = ", ".join(option.value for option in quality_options_for_format(args.format))
+        print(f"[ERROR] {exc}", file=sys.stderr)
+        print(f"[INFO] Valid --quality values for --format {args.format}: {valid}", file=sys.stderr)
+        return 1
 
     jobs = []
     for index, (label, url) in enumerate(sources):
@@ -102,7 +126,7 @@ def run_cli(args) -> int:
         )
         jobs.append(job)
 
-    download_slots = max(1, args.concurrent if args.concurrent is not None else args.concurrent_downloads)
+    download_slots = max(1, args.concurrent_downloads)
     convert_slots = max(1, args.concurrent_converts)
     start_delay = max(0.0, args.download_start_delay)
     runtime = DownloadRuntime(download_slots, convert_slots, start_delay)
@@ -181,6 +205,9 @@ def _run_cli_job(
                 "PROGRESS",
             )
         elif status == "finished":
+            if getattr(item, "_download_finished_logged", False):
+                return
+            item._download_finished_logged = True
             reporter.log(active_job.playlist_title, f"Download complete: {item.title}", "SUCCESS")
 
     def on_ffmpeg_progress(active_job, item, progress):
@@ -211,3 +238,12 @@ def _run_cli_job(
         f"Done {job.completed_videos}/{job.total_videos} files ({job.failed_videos} failed)",
         level,
     )
+
+
+def _print_format_table() -> None:
+    print("Supported formats and qualities:")
+    for spec in FORMAT_SPECS.values():
+        qualities = ", ".join(option.value for option in spec.quality_options)
+        kind = "video" if spec.media_kind == "video" else "audio"
+        print(f"  {spec.code:<7s} {kind:<5s} .{spec.final_ext:<4s} {spec.label}")
+        print(f"          qualities: {qualities}")

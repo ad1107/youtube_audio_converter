@@ -3,109 +3,53 @@ from __future__ import annotations
 import os
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable
 
 import yt_dlp
 
 from ..dependencies import get_deno_path
-from .cookies import normalize_cookiesfrombrowser
-from .ffmpeg_progress import FFmpegProgress, ffmpeg_progress_context
+from .download_types import DownloadCallbacks, DownloadItem, DownloadSettings, FailedItem
+from .ffmpeg_progress import ffmpeg_progress_context
+from .formats import (
+    format_quality_summary,
+    get_format_spec,
+    normalize_quality,
+    supports_audio_filters,
+)
 from .formatting import fmt_duration
 from .media import (
     build_postprocessors,
     clone_postprocessors,
     existing_output_path,
     filename_info,
-    final_audio_ext,
     item_template,
     item_url,
     output_folder_for,
 )
 from .runtime import DownloadRuntime
 from .urls import detect_no_playlist, url_kind_label
-from .yt_logger import YTLogger
-
-
-LogCallback = Callable[[str, str, str], None]
-
-
-def _noop(*args, **kwargs):
-    return None
-
-
-@dataclass
-class DownloadSettings:
-    output_dir: str
-    fmt: str
-    quality: str
-    speed: float = 1.0
-    volume: float = 1.0
-    cookiefile: str = ""
-    cookies_browser: str = ""
-    use_deno: bool = False
-    embed_thumbnail: bool = True
-    crop_thumbnail: bool = True
-    embed_metadata: bool = True
-    track_num: bool = True
-    skip_existing: bool = True
-    suppress_js_warnings: bool = True
-    verbose: bool = False
-    max_retries: int = 5
-    concurrent_downloads: int = 2
-    concurrent_converts: int = 1
-    download_start_delay: float = 10.0
-    runtime: "DownloadRuntime | None" = field(default=None, repr=False)
-
-
-@dataclass
-class DownloadItem:
-    index: int
-    title: str
-    url: str
-    outtmpl: str
-    expected_path: str
-    duration: float = 0.0
-    info: dict = field(default_factory=dict)
-
-
-@dataclass
-class FailedItem:
-    title: str
-    url: str
-    source_url: str
-    playlist_title: str
-    reason: str = ""
-    index: int = 0
-
-    def as_dict(self) -> dict:
-        return {
-            "title": self.title,
-            "url": self.url,
-            "source_url": self.source_url,
-            "playlist_title": self.playlist_title,
-            "reason": self.reason,
-            "index": self.index,
-        }
-
-
-@dataclass
-class DownloadCallbacks:
-    log: LogCallback = _noop
-    is_cancelled: Callable[[], bool] = lambda: False
-    on_metadata: Callable[[object, str, int, str], None] = _noop
-    on_item_started: Callable[[object, DownloadItem, int], None] = _noop
-    on_item_skipped: Callable[[object, DownloadItem, str], None] = _noop
-    on_item_done: Callable[[object, DownloadItem, str], None] = _noop
-    on_item_failed: Callable[[object, DownloadItem | None, FailedItem], None] = _noop
-    on_download_progress: Callable[[object, DownloadItem, dict], None] = _noop
-    on_postprocessor: Callable[[object, DownloadItem, dict], None] = _noop
-    on_ffmpeg_progress: Callable[[object, DownloadItem, FFmpegProgress], None] = _noop
+from .ydl_options import build_ydl_options, build_yt_logger
 
 
 def run_download_job(job, settings: DownloadSettings, callbacks: DownloadCallbacks) -> list[FailedItem]:
     failures: list[FailedItem] = []
+    job.status = "running"
+    job.start_time = time.time()
+    job.completed_videos = 0
+    job.failed_videos = 0
+    job.error_msg = ""
+
+    try:
+        settings.quality = normalize_quality(settings.fmt, settings.quality)
+    except ValueError as exc:
+        failure = _record_failure(job, failures, callbacks, None, str(exc), job.url)
+        job.status = "error"
+        job.error_msg = failure.reason
+        job.total_videos = max(getattr(job, "total_videos", 0), 1)
+        job.failed_videos = 1
+        job.end_time = time.time()
+        return failures
+
     if settings.runtime is None:
         settings.runtime = DownloadRuntime(
             settings.concurrent_downloads,
@@ -113,25 +57,25 @@ def run_download_job(job, settings: DownloadSettings, callbacks: DownloadCallbac
             settings.download_start_delay,
         )
 
-    job.status = "running"
-    job.start_time = time.time()
-    job.completed_videos = 0
-    job.failed_videos = 0
-    job.error_msg = ""
-
     Path(settings.output_dir).mkdir(parents=True, exist_ok=True)
     if settings.use_deno and not get_deno_path():
         callbacks.log(job.url[:60], "Use Deno is enabled, but Deno was not found; continuing without it.", "WARNING")
+    if not supports_audio_filters(settings.fmt) and (settings.speed != 1.0 or settings.volume != 1.0):
+        callbacks.log(
+            job.url[:60],
+            "Playback speed and volume filters are audio-only; ignoring them for video output.",
+            "WARNING",
+        )
 
     no_playlist = detect_no_playlist(job.url)
     kind_label = url_kind_label(job.url)
     callbacks.log(job.url[:60], f"Auto-detected as {kind_label}; fetching metadata...", "INFO")
 
     try:
-        metadata_opts = _ydl_options(
+        metadata_opts = build_ydl_options(
             settings,
             outtmpl=None,
-            logger=_logger(job, settings, callbacks),
+            logger=build_yt_logger(job, settings, callbacks),
             noplaylist=no_playlist,
             include_postprocessors=False,
             ignoreerrors=True,
@@ -164,11 +108,12 @@ def run_download_job(job, settings: DownloadSettings, callbacks: DownloadCallbac
     job.output_folder = output_folder_for(settings.output_dir, getattr(job, "label", None), title, job.job_id)
     Path(job.output_folder).mkdir(parents=True, exist_ok=True)
 
-    speed_note = f"  speed {settings.speed}x" if settings.speed != 1.0 else ""
-    volume_note = f"  volume {settings.volume}x" if settings.volume != 1.0 else ""
+    spec = get_format_spec(settings.fmt)
+    speed_note = f"  speed {settings.speed}x" if spec.supports_audio_filters and settings.speed != 1.0 else ""
+    volume_note = f"  volume {settings.volume}x" if spec.supports_audio_filters and settings.volume != 1.0 else ""
     callbacks.log(
         job.playlist_title,
-        f"Found {job.total_videos} video(s) -> {settings.fmt.upper()} @ {settings.quality}{speed_note}{volume_note}",
+        f"Found {job.total_videos} item(s) -> {format_quality_summary(settings.fmt, settings.quality)}{speed_note}{volume_note}",
         "INFO",
     )
     callbacks.on_metadata(job, job.playlist_title, job.total_videos, job.output_folder)
@@ -192,7 +137,7 @@ def run_download_job(job, settings: DownloadSettings, callbacks: DownloadCallbac
             break
 
         item = _make_item(entry, job, settings, index, is_playlist)
-        callbacks.on_item_started(job, item, index)
+        callbacks.on_item_queued(job, item, index)
 
         if settings.skip_existing:
             existing = existing_output_path(item.outtmpl, item.info, settings.fmt)
@@ -268,19 +213,6 @@ def _download_item(job, item: DownloadItem, settings: DownloadSettings, callback
             )
         )
 
-        ydl_opts = _ydl_options(
-            settings,
-            outtmpl=item.outtmpl,
-            logger=_logger(job, settings, callbacks),
-            noplaylist=True,
-            include_postprocessors=True,
-            ignoreerrors=False,
-            postprocessors=postprocessors,
-            postprocessor_args=postprocessor_args,
-            progress_hook=lambda data, j=job, it=item: _download_progress(callbacks, j, it, data),
-            postprocessor_hook=lambda data, j=job, it=item: callbacks.on_postprocessor(j, it, data),
-        )
-
         download_slot_acquired = False
         download_slot_released = False
 
@@ -291,11 +223,25 @@ def _download_item(job, item: DownloadItem, settings: DownloadSettings, callback
                 download_slot_released = True
 
         def progress_hook(data, j=job, it=item):
-            if data.get("status") == "finished":
-                release_download_slot()
             _download_progress(callbacks, j, it, data)
 
-        ydl_opts["progress_hooks"] = [progress_hook]
+        def postprocessor_hook(data, j=job, it=item):
+            if data.get("status") == "started":
+                release_download_slot()
+            callbacks.on_postprocessor(j, it, data)
+
+        ydl_opts = build_ydl_options(
+            settings,
+            outtmpl=item.outtmpl,
+            logger=build_yt_logger(job, settings, callbacks),
+            noplaylist=True,
+            include_postprocessors=True,
+            ignoreerrors=False,
+            postprocessors=postprocessors,
+            postprocessor_args=postprocessor_args,
+            progress_hook=progress_hook,
+            postprocessor_hook=postprocessor_hook,
+        )
 
         try:
             if not settings.runtime.download_gate.acquire(callbacks.is_cancelled):
@@ -381,75 +327,6 @@ def _record_failure(
     callbacks.on_item_failed(job, item, failure)
     callbacks.log(failure.playlist_title, f"Failed: {failure.title} ({reason})", "ERROR")
     return failure
-
-
-def _ydl_options(
-    settings: DownloadSettings,
-    outtmpl: str | None,
-    logger,
-    noplaylist: bool,
-    include_postprocessors: bool,
-    ignoreerrors: bool,
-    postprocessors=None,
-    postprocessor_args=None,
-    progress_hook=None,
-    postprocessor_hook=None,
-) -> dict:
-    opts = {
-        "format": "bestaudio/best",
-        "noplaylist": noplaylist,
-        "ignoreerrors": ignoreerrors,
-        "no_warnings": False,
-        "quiet": True,
-        "color": "no_color",
-        "overwrites": not settings.skip_existing,
-        "nooverwrites": settings.skip_existing,
-        "final_ext": final_audio_ext(settings.fmt),
-        "concurrent_fragment_downloads": 4,
-        "logger": logger,
-    }
-    if outtmpl:
-        opts["outtmpl"] = outtmpl
-    if include_postprocessors:
-        opts["postprocessors"] = postprocessors or []
-        opts["postprocessor_args"] = postprocessor_args or {}
-        opts["writethumbnail"] = settings.embed_thumbnail
-    if progress_hook:
-        opts["progress_hooks"] = [progress_hook]
-    if postprocessor_hook:
-        opts["postprocessor_hooks"] = [postprocessor_hook]
-
-    if settings.use_deno:
-        deno_path = get_deno_path()
-        if deno_path:
-            opts["js_runtimes"] = {"deno": {"path": deno_path}}
-            opts["remote_components"] = ["ejs:github"]
-
-    if settings.cookiefile:
-        opts["cookiefile"] = settings.cookiefile
-    elif settings.cookies_browser and settings.cookies_browser != "None":
-        cookies = normalize_cookiesfrombrowser(settings.cookies_browser)
-        if cookies:
-            opts["cookiesfrombrowser"] = cookies
-
-    if settings.track_num and settings.embed_metadata:
-        opts["parse_metadata"] = ["%(playlist_index)s:%(track_number)s"]
-
-    return opts
-
-
-def _logger(job, settings: DownloadSettings, callbacks: DownloadCallbacks):
-    def debug(message):
-        if settings.verbose or "ffmpeg command line:" in message:
-            callbacks.log(getattr(job, "playlist_title", "") or job.url[:60], message, "DEBUG")
-
-    return YTLogger(
-        cb_info=None,
-        cb_warn=lambda message: callbacks.log(getattr(job, "playlist_title", "") or job.url[:60], message, "WARNING"),
-        cb_err=lambda message: callbacks.log(getattr(job, "playlist_title", "") or job.url[:60], message, "ERROR"),
-        cb_debug=debug,
-        suppress_js_warnings=settings.suppress_js_warnings,
-    )
 
 
 def summarize_elapsed(job) -> str:

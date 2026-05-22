@@ -8,6 +8,8 @@ def should_use_cli(args) -> bool:
         return False
     if getattr(args, "download_dependencies", None):
         return True
+    if getattr(args, "list_formats", False):
+        return True
     if args.cli:
         return True
     return bool(args.url or args.input)

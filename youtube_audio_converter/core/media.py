@@ -6,19 +6,16 @@ import yt_dlp
 from yt_dlp.postprocessor import ffmpeg as yt_ffmpeg
 from yt_dlp.utils import sanitize_filename
 
-
-FINAL_EXTENSIONS = {
-    "alac": "m4a",
-    "aiff": "aiff",
-    "m4a": "m4a",
-    "mp3": "mp3",
-    "flac": "flac",
-    "wav": "wav",
-}
+from .formats import (
+    final_output_ext,
+    get_format_spec,
+    get_quality_option,
+    supports_thumbnail,
+)
 
 
 def ensure_audio_codec_support() -> None:
-    """Patch small gaps in yt-dlp's FFmpegExtractAudio table."""
+    """Patch yt-dlp's extract-audio table for formats it can mux through FFmpeg."""
     if "aiff" not in yt_ffmpeg.ACODECS:
         yt_ffmpeg.ACODECS["aiff"] = ("aiff", None, ("-f", "aiff", "-acodec", "pcm_s16be"))
     if "aiff" not in yt_ffmpeg.FFmpegExtractAudioPP.SUPPORTED_EXTS:
@@ -29,7 +26,7 @@ def ensure_audio_codec_support() -> None:
 
 
 def final_audio_ext(fmt: str) -> str:
-    return FINAL_EXTENSIONS.get(fmt, fmt)
+    return final_output_ext(fmt)
 
 
 def safe_folder_name(value: str, fallback: str = "YouTube Audio") -> str:
@@ -53,65 +50,70 @@ def build_postprocessors(
     skip_existing: bool = True,
 ):
     ensure_audio_codec_support()
-    is_he_aac = quality.startswith("he_")
-    is_lossless = fmt in ["flac", "wav", "aiff", "alac"]
+    spec = get_format_spec(fmt)
+    quality_option = get_quality_option(fmt, quality)
 
-    pp_extract = {
-        "key": "FFmpegExtractAudio",
-        "preferredcodec": fmt,
-        "nopostoverwrites": skip_existing,
-    }
-    if not is_he_aac and not is_lossless:
-        pp_extract["preferredquality"] = quality
+    postprocessors = []
+    postprocessor_args: dict[str, list[str]] = {}
 
-    postprocessors = [pp_extract]
+    if spec.media_kind == "audio":
+        pp_extract = {
+            "key": "FFmpegExtractAudio",
+            "preferredcodec": spec.extract_codec or spec.code,
+            "nopostoverwrites": skip_existing,
+        }
+        if quality_option.ffmpeg_quality and not spec.lossless and spec.code != "he-aac":
+            pp_extract["preferredquality"] = quality_option.ffmpeg_quality
+        postprocessors.append(pp_extract)
+
+        extract_args = _extract_audio_args(spec.code, quality, speed, volume)
+        if extract_args:
+            postprocessor_args["extractaudio+ffmpeg_o"] = extract_args
+
     if embed_metadata:
         postprocessors.append({"key": "FFmpegMetadata", "add_metadata": True})
-    if embed_thumbnail:
+
+    if spec.media_kind == "audio" and embed_thumbnail and supports_thumbnail(spec.code):
         postprocessors.append({"key": "FFmpegThumbnailsConvertor", "format": "jpg"})
         postprocessors.append({"key": "EmbedThumbnail", "already_have_thumbnail": False})
 
-    postprocessor_args: dict[str, list[str]] = {}
-    audio_filter = _audio_filter(speed, volume)
+    if spec.media_kind == "audio" and embed_thumbnail and crop_thumb and supports_thumbnail(spec.code):
+        crop_vf = "crop='if(gt(ih,iw),iw,ih)':'if(gt(iw,ih),ih,iw)'"
+        postprocessor_args["thumbnailsconvertor+ffmpeg_o"] = ["-c:v", "mjpeg", "-vf", crop_vf]
 
-    if is_he_aac:
-        bitrate = quality.split("_", 1)[1] + "k"
-        extract_args = [
+    return postprocessors, postprocessor_args
+
+
+def _extract_audio_args(fmt: str, quality: str, speed: float, volume: float) -> list[str]:
+    spec = get_format_spec(fmt)
+    quality_option = get_quality_option(fmt, quality)
+    audio_filter = _audio_filter(speed, volume) if spec.supports_audio_filters else None
+
+    if spec.code == "he-aac":
+        args = [
             "-c:a",
-            "libfdk_aac",
+            spec.audio_encoder or "libfdk_aac",
             "-profile:a",
             "aac_he",
             "-b:a",
-            bitrate,
+            quality_option.bitrate or f"{quality_option.value}k",
             "-ac",
             "1",
             "-ar",
             "44100",
         ]
         if audio_filter:
-            extract_args.extend(["-af", audio_filter])
-        postprocessor_args["extractaudio+ffmpeg_o"] = extract_args
-    elif audio_filter:
-        encoder_map = {
-            "m4a": "aac",
-            "mp3": "libmp3lame",
-            "flac": "flac",
-            "wav": "pcm_s16le",
-            "aiff": "pcm_s16be",
-            "alac": "alac",
-        }
-        postprocessor_args["extractaudio+ffmpeg_o"] = [
-            "-c:a",
-            encoder_map.get(fmt, "aac"),
-            "-af",
-            audio_filter,
-        ]
+            args.extend(["-af", audio_filter])
+        return args
 
-    if embed_thumbnail and crop_thumb:
-        crop_vf = "crop='if(gt(ih,iw),iw,ih)':'if(gt(iw,ih),ih,iw)'"
-        postprocessor_args["thumbnailsconvertor+ffmpeg_o"] = ["-c:v", "mjpeg", "-vf", crop_vf]
+    if not audio_filter:
+        return []
 
-    return postprocessors, postprocessor_args
+    args = ["-c:a", spec.audio_encoder or "aac"]
+    if quality_option.bitrate and not spec.lossless:
+        args.extend(["-b:a", quality_option.bitrate])
+    args.extend(["-af", audio_filter])
+    return args
 
 
 def _atempo_filter(speed: float) -> str | None:
@@ -183,12 +185,12 @@ def filename_info(entry: dict, playlist_title: str, index: int, fmt: str) -> dic
     info["playlist"] = info.get("playlist") or playlist_title
     info["playlist_index"] = info.get("playlist_index") or index
     info["title"] = info.get("title") or f"Track {index:02d}"
-    info["ext"] = final_audio_ext(fmt)
+    info["ext"] = final_output_ext(fmt)
     return info
 
 
 def expected_output_path(outtmpl: str, info: dict, fmt: str) -> str:
-    final_ext = final_audio_ext(fmt)
+    final_ext = final_output_ext(fmt)
     params = {
         "outtmpl": outtmpl,
         "quiet": True,
@@ -196,7 +198,13 @@ def expected_output_path(outtmpl: str, info: dict, fmt: str) -> str:
         "final_ext": final_ext,
     }
     with yt_dlp.YoutubeDL(params) as ydl:
-        filename = ydl.prepare_filename(filename_info(info, info.get("playlist_title") or "", info.get("playlist_index") or 1, fmt))
+        prepared_info = filename_info(
+            info,
+            info.get("playlist_title") or "",
+            info.get("playlist_index") or 1,
+            fmt,
+        )
+        filename = ydl.prepare_filename(prepared_info)
     return filename
 
 
