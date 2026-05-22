@@ -42,14 +42,17 @@ def install_ffmpeg_progress_patch() -> None:
 
 
 @contextlib.contextmanager
-def ffmpeg_progress_context(callback: ProgressCallback | None):
+def ffmpeg_progress_context(callback: ProgressCallback | None, conversion_gate=None):
     install_ffmpeg_progress_patch()
-    previous = getattr(_state, "callback", None)
+    previous_callback = getattr(_state, "callback", None)
+    previous_gate = getattr(_state, "conversion_gate", None)
     _state.callback = callback
+    _state.conversion_gate = conversion_gate
     try:
         yield
     finally:
-        _state.callback = previous
+        _state.callback = previous_callback
+        _state.conversion_gate = previous_gate
 
 
 def parse_ffmpeg_status(text: str) -> FFmpegProgress | None:
@@ -83,8 +86,21 @@ def _parse_time(value: str) -> float:
 
 def _patched_real_run_ffmpeg(self, input_path_opts, output_path_opts, *, expected_retcodes=(0,)):
     callback = getattr(_state, "callback", None)
+    conversion_gate = getattr(_state, "conversion_gate", None)
     if callback is None:
         return _original_real_run(self, input_path_opts, output_path_opts, expected_retcodes=expected_retcodes)
+
+    if conversion_gate is None:
+        return _run_ffmpeg_with_progress(self, input_path_opts, output_path_opts, expected_retcodes, callback)
+
+    conversion_gate.acquire()
+    try:
+        return _run_ffmpeg_with_progress(self, input_path_opts, output_path_opts, expected_retcodes, callback)
+    finally:
+        conversion_gate.release()
+
+
+def _run_ffmpeg_with_progress(self, input_path_opts, output_path_opts, expected_retcodes, callback):
 
     self.check_version()
     oldest_mtime = min(os.stat(path).st_mtime for path, _ in input_path_opts if path)

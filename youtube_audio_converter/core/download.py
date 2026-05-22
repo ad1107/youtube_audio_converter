@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
@@ -22,6 +23,7 @@ from .media import (
     item_url,
     output_folder_for,
 )
+from .runtime import DownloadRuntime
 from .urls import detect_no_playlist, url_kind_label
 from .yt_logger import YTLogger
 
@@ -39,6 +41,7 @@ class DownloadSettings:
     fmt: str
     quality: str
     speed: float = 1.0
+    volume: float = 1.0
     cookiefile: str = ""
     cookies_browser: str = ""
     use_deno: bool = False
@@ -50,6 +53,10 @@ class DownloadSettings:
     suppress_js_warnings: bool = True
     verbose: bool = False
     max_retries: int = 5
+    concurrent_downloads: int = 2
+    concurrent_converts: int = 1
+    download_start_delay: float = 10.0
+    runtime: "DownloadRuntime | None" = field(default=None, repr=False)
 
 
 @dataclass
@@ -99,6 +106,13 @@ class DownloadCallbacks:
 
 def run_download_job(job, settings: DownloadSettings, callbacks: DownloadCallbacks) -> list[FailedItem]:
     failures: list[FailedItem] = []
+    if settings.runtime is None:
+        settings.runtime = DownloadRuntime(
+            settings.concurrent_downloads,
+            settings.concurrent_converts,
+            settings.download_start_delay,
+        )
+
     job.status = "running"
     job.start_time = time.time()
     job.completed_videos = 0
@@ -151,9 +165,10 @@ def run_download_job(job, settings: DownloadSettings, callbacks: DownloadCallbac
     Path(job.output_folder).mkdir(parents=True, exist_ok=True)
 
     speed_note = f"  speed {settings.speed}x" if settings.speed != 1.0 else ""
+    volume_note = f"  volume {settings.volume}x" if settings.volume != 1.0 else ""
     callbacks.log(
         job.playlist_title,
-        f"Found {job.total_videos} video(s) -> {settings.fmt.upper()} @ {settings.quality}{speed_note}",
+        f"Found {job.total_videos} video(s) -> {settings.fmt.upper()} @ {settings.quality}{speed_note}{volume_note}",
         "INFO",
     )
     callbacks.on_metadata(job, job.playlist_title, job.total_videos, job.output_folder)
@@ -162,7 +177,15 @@ def run_download_job(job, settings: DownloadSettings, callbacks: DownloadCallbac
         job.status = "cancelled"
         return failures
 
-    callbacks.log(job.playlist_title, f"Starting download -> {job.output_folder}", "INFO")
+    callbacks.log(
+        job.playlist_title,
+        f"Starting download -> {job.output_folder} "
+        f"(DL {settings.concurrent_downloads}, convert {settings.concurrent_converts}, "
+        f"start gap {settings.download_start_delay:g}s)",
+        "INFO",
+    )
+
+    pending_items: list[DownloadItem] = []
     for index, entry in enumerate(entries, start=1):
         if callbacks.is_cancelled():
             job.status = "cancelled"
@@ -179,18 +202,46 @@ def run_download_job(job, settings: DownloadSettings, callbacks: DownloadCallbac
                 callbacks.on_item_skipped(job, item, existing)
                 continue
 
-        if _download_item(job, item, settings, callbacks):
-            job.completed_videos += 1
-            callbacks.on_item_done(job, item, item.expected_path)
-            continue
+        pending_items.append(item)
 
-        failure = _record_failure(job, failures, callbacks, item, "Download or conversion failed", item.url)
-        job.failed_videos += 1
+    if pending_items and job.status != "cancelled":
+        workers = _item_worker_count(len(pending_items), settings)
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            future_map = {
+                executor.submit(_download_item, job, item, settings, callbacks): item
+                for item in pending_items
+            }
+            for future in as_completed(future_map):
+                item = future_map[future]
+                if callbacks.is_cancelled():
+                    job.status = "cancelled"
+                try:
+                    success = future.result()
+                except Exception as exc:
+                    success = False
+                    callbacks.log(job.playlist_title, f"{item.title}: {exc}", "ERROR")
+
+                if callbacks.is_cancelled():
+                    job.status = "cancelled"
+                    continue
+
+                if success:
+                    job.completed_videos += 1
+                    callbacks.on_item_done(job, item, item.expected_path)
+                else:
+                    job.failed_videos += 1
+                    _record_failure(job, failures, callbacks, item, "Download or conversion failed", item.url)
 
     if job.status != "cancelled":
         job.status = "error" if job.failed_videos else "completed"
     job.end_time = time.time()
     return failures
+
+
+def _item_worker_count(item_count: int, settings: DownloadSettings) -> int:
+    buffer_workers = max(8, settings.concurrent_downloads * 2)
+    wanted = settings.concurrent_downloads + settings.concurrent_converts + buffer_workers
+    return max(1, min(item_count, wanted))
 
 
 def _download_item(job, item: DownloadItem, settings: DownloadSettings, callbacks: DownloadCallbacks) -> bool:
@@ -209,6 +260,7 @@ def _download_item(job, item: DownloadItem, settings: DownloadSettings, callback
                 fmt=settings.fmt,
                 quality=settings.quality,
                 speed=settings.speed,
+                volume=settings.volume,
                 embed_thumbnail=settings.embed_thumbnail,
                 crop_thumb=settings.crop_thumbnail,
                 embed_metadata=settings.embed_metadata,
@@ -229,8 +281,32 @@ def _download_item(job, item: DownloadItem, settings: DownloadSettings, callback
             postprocessor_hook=lambda data, j=job, it=item: callbacks.on_postprocessor(j, it, data),
         )
 
+        download_slot_acquired = False
+        download_slot_released = False
+
+        def release_download_slot():
+            nonlocal download_slot_released
+            if download_slot_acquired and not download_slot_released:
+                settings.runtime.download_gate.release()
+                download_slot_released = True
+
+        def progress_hook(data, j=job, it=item):
+            if data.get("status") == "finished":
+                release_download_slot()
+            _download_progress(callbacks, j, it, data)
+
+        ydl_opts["progress_hooks"] = [progress_hook]
+
         try:
-            with ffmpeg_progress_context(lambda progress, j=job, it=item: callbacks.on_ffmpeg_progress(j, it, progress)):
+            if not settings.runtime.download_gate.acquire(callbacks.is_cancelled):
+                return False
+            download_slot_acquired = True
+            callbacks.on_item_started(job, item, item.index)
+
+            with ffmpeg_progress_context(
+                lambda progress, j=job, it=item: callbacks.on_ffmpeg_progress(j, it, progress),
+                conversion_gate=settings.runtime.conversion_gate,
+            ):
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     result = ydl.download([item.url])
             if result == 0 and _item_output_exists(item):
@@ -244,6 +320,8 @@ def _download_item(job, item: DownloadItem, settings: DownloadSettings, callback
                 return False
         except Exception as exc:
             last_error = str(exc)
+        finally:
+            release_download_slot()
 
         if last_error:
             callbacks.log(job.playlist_title, f"{item.title}: {last_error}", "ERROR")

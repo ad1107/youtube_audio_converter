@@ -17,6 +17,7 @@ class PlaylistJob:
     job_id: int
     label: str | None      = None
     speed: float          = 1.0
+    volume: float         = 1.0
     playlist_title: str   = "Fetching..."
     total_videos: int     = 0
     completed_videos: int = 0

@@ -15,6 +15,7 @@ except ImportError:
 
 from youtube_audio_converter.core.download import DownloadCallbacks, DownloadSettings, run_download_job, summarize_elapsed
 from youtube_audio_converter.core.formatting import fmt_duration, fmt_speed
+from youtube_audio_converter.core.runtime import DownloadRuntime
 from youtube_audio_converter.core.urls import parse_source_line
 from youtube_audio_converter.dependencies import get_ffmpeg_path
 from .models import FORMATS, LOG_COLOURS, QUALITIES, PlaylistJob, Theme
@@ -107,6 +108,10 @@ class GUIDownloaderMixin:
         fmt = FORMATS.get(self.var_format.get(), "m4a")
         quality = QUALITIES.get(self.var_quality.get(), "0")
         speed = float(self.var_speed.get() or 1.0)
+        volume = float(self.var_volume.get() or 1.0)
+        if volume <= 0:
+            messagebox.showwarning("Invalid Volume", "Volume must be greater than 0.")
+            return
         os.makedirs(out_dir, exist_ok=True)
 
         self.cancel_flag.clear()
@@ -116,6 +121,7 @@ class GUIDownloaderMixin:
         self.jobs = []
         for index, (label, url) in enumerate(sources):
             job = PlaylistJob(url=url, output_dir=out_dir, fmt=fmt, quality=quality, speed=speed, job_id=index, label=label)
+            job.volume = volume
             self.jobs.append(job)
 
         self.pb_overall["value"] = 0
@@ -156,12 +162,19 @@ class GUIDownloaderMixin:
         self.lbl_badge.config(text="STOPPING...", fg=Theme.YELLOW)
 
     def _run_all(self):
-        concurrency = max(1, self.var_concurrent.get())
+        download_slots = max(1, int(self.var_concurrent_downloads.get() or 1))
+        convert_slots = max(1, int(self.var_concurrent_converts.get() or 1))
+        start_delay = max(0.0, float(self.var_download_start_delay.get() or 0.0))
+        self.download_runtime = DownloadRuntime(download_slots, convert_slots, start_delay)
         self.failed_items = []
         self.failed_items_lock = threading.Lock()
 
-        self.log("SYSTEM", f"Launching {len(self.jobs)} job(s), {concurrency} concurrent", "INFO")
-        with ThreadPoolExecutor(max_workers=concurrency) as executor:
+        self.log(
+            "SYSTEM",
+            f"Launching {len(self.jobs)} source(s), DL {download_slots}, convert {convert_slots}, start gap {start_delay:g}s",
+            "INFO",
+        )
+        with ThreadPoolExecutor(max_workers=max(1, len(self.jobs))) as executor:
             future_map = {executor.submit(self._download_job, job): job for job in self.jobs}
             for future in as_completed(future_map):
                 job = future_map[future]
@@ -180,6 +193,7 @@ class GUIDownloaderMixin:
             fmt=job.fmt,
             quality=job.quality,
             speed=job.speed,
+            volume=getattr(job, "volume", 1.0),
             cookiefile=getattr(self, "var_cookiefile", tk.StringVar(value="")).get().strip(),
             cookies_browser=getattr(self, "var_cookies_browser", tk.StringVar(value="None")).get().strip(),
             use_deno=bool(getattr(self, "var_use_deno", tk.BooleanVar(value=False)).get()),
@@ -190,6 +204,10 @@ class GUIDownloaderMixin:
             skip_existing=bool(self.var_skip_existing.get()),
             suppress_js_warnings=bool(getattr(self, "var_suppress_js", tk.BooleanVar(value=True)).get()),
             max_retries=5,
+            concurrent_downloads=max(1, int(self.var_concurrent_downloads.get() or 1)),
+            concurrent_converts=max(1, int(self.var_concurrent_converts.get() or 1)),
+            download_start_delay=max(0.0, float(self.var_download_start_delay.get() or 0.0)),
+            runtime=self.download_runtime,
         )
         callbacks = DownloadCallbacks(
             log=self.log,

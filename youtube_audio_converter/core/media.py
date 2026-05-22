@@ -46,6 +46,7 @@ def build_postprocessors(
     fmt: str,
     quality: str,
     speed: float,
+    volume: float,
     embed_thumbnail: bool,
     crop_thumb: bool,
     embed_metadata: bool,
@@ -71,7 +72,7 @@ def build_postprocessors(
         postprocessors.append({"key": "EmbedThumbnail", "already_have_thumbnail": False})
 
     postprocessor_args: dict[str, list[str]] = {}
-    atempo_filter = _atempo_filter(speed)
+    audio_filter = _audio_filter(speed, volume)
 
     if is_he_aac:
         bitrate = quality.split("_", 1)[1] + "k"
@@ -87,10 +88,10 @@ def build_postprocessors(
             "-ar",
             "44100",
         ]
-        if atempo_filter:
-            extract_args.extend(["-af", atempo_filter])
+        if audio_filter:
+            extract_args.extend(["-af", audio_filter])
         postprocessor_args["extractaudio+ffmpeg_o"] = extract_args
-    elif atempo_filter:
+    elif audio_filter:
         encoder_map = {
             "m4a": "aac",
             "mp3": "libmp3lame",
@@ -103,7 +104,7 @@ def build_postprocessors(
             "-c:a",
             encoder_map.get(fmt, "aac"),
             "-af",
-            atempo_filter,
+            audio_filter,
         ]
 
     if embed_thumbnail and crop_thumb:
@@ -133,6 +134,22 @@ def _atempo_filter(speed: float) -> str | None:
         remaining /= 100.0
     factors.append(remaining)
     return ",".join(f"atempo={factor:.6g}" for factor in factors)
+
+
+def _audio_filter(speed: float, volume: float) -> str | None:
+    filters = []
+    atempo = _atempo_filter(speed)
+    if atempo:
+        filters.extend(atempo.split(","))
+
+    try:
+        volume = float(volume)
+    except (TypeError, ValueError):
+        volume = 1.0
+    if volume > 0 and abs(volume - 1.0) > 0.000001:
+        filters.append(f"volume={volume:.6g}")
+
+    return ",".join(filters) if filters else None
 
 
 def clone_postprocessors(postprocessors, postprocessor_args):

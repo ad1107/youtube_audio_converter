@@ -25,9 +25,10 @@ from .models import (
 )
 from .builder import GUIBuilderMixin
 from .downloader import GUIDownloaderMixin
+from .settings import GUISettingsMixin
 
 
-class YoutubeAudioConverter(tk.Tk, GUIBuilderMixin, GUIDownloaderMixin):
+class YoutubeAudioConverter(tk.Tk, GUIBuilderMixin, GUISettingsMixin, GUIDownloaderMixin):
 
     def __init__(self):
         super().__init__()
@@ -45,7 +46,10 @@ class YoutubeAudioConverter(tk.Tk, GUIBuilderMixin, GUIDownloaderMixin):
         self.var_format        = tk.StringVar(value=list(FORMATS.keys())[0])
         self.var_quality       = tk.StringVar(value=list(QUALITIES.keys())[0])
         self.var_speed         = tk.DoubleVar(value=1.0)
-        self.var_concurrent    = tk.IntVar(value=2)
+        self.var_volume        = tk.DoubleVar(value=1.0)
+        self.var_concurrent_downloads = tk.IntVar(value=2)
+        self.var_concurrent_converts  = tk.IntVar(value=1)
+        self.var_download_start_delay = tk.DoubleVar(value=10.0)
         self.var_when_done     = tk.StringVar(value="Do nothing")
         self.var_cookiefile    = tk.StringVar(value="")
         self.var_cookies_browser = tk.StringVar(value="None")

@@ -3,8 +3,7 @@ import sys
 import subprocess
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
-from youtube_audio_converter import dependencies
-from .models import FORMATS, LOG_COLOURS, QUALITIES, Theme
+from .models import LOG_COLOURS, Theme
 
 class GUIBuilderMixin:
 
@@ -212,124 +211,6 @@ class GUIBuilderMixin:
         if   sys.platform == "darwin": subprocess.run(["open",     path])
         elif sys.platform == "win32":  os.startfile(path)
         else:                          subprocess.run(["xdg-open", path])
-
-    # ── Settings Section ──────────────────────────────────────────────────────
-
-    def _build_settings_section(self, parent):
-        card = self._card(parent, margin_bottom=10)
-        hrow = tk.Frame(card, bg=Theme.BG2, padx=12, pady=10)
-        hrow.pack(fill="x")
-        self._section_label(hrow, "SETTINGS").pack(anchor="w")
-
-        body  = tk.Frame(card, bg=Theme.BG2, padx=12)
-        body.pack(fill="x", pady=(0, 8))
-        LBL_W = 15
-
-        r = tk.Frame(body, bg=Theme.BG2); r.pack(fill="x", pady=3)
-        tk.Label(r, text="Format", bg=Theme.BG2, fg=Theme.MUTED,
-                 font=("Helvetica Neue", 10), width=LBL_W, anchor="w").pack(side="left")
-        ttk.Combobox(r, textvariable=self.var_format, values=list(FORMATS.keys()),
-                     state="readonly", font=("Helvetica Neue", 10), width=30).pack(side="left")
-
-        r = tk.Frame(body, bg=Theme.BG2); r.pack(fill="x", pady=3)
-        tk.Label(r, text="Quality", bg=Theme.BG2, fg=Theme.MUTED,
-                 font=("Helvetica Neue", 10), width=LBL_W, anchor="w").pack(side="left")
-        self.cb_quality = ttk.Combobox(r, textvariable=self.var_quality, values=list(QUALITIES.keys()),
-                     state="readonly", font=("Helvetica Neue", 10), width=22)
-        self.cb_quality.pack(side="left")
-
-        # ── Setup Trace for Lossless Formats ──
-        def _on_format_change(*args):
-            fmt_name = self.var_format.get()
-            fmt_code = FORMATS.get(fmt_name, "m4a")
-            if fmt_code in ["flac", "wav", "alac", "aiff"]:
-                self.cb_quality.config(state="disabled")
-            else:
-                self.cb_quality.config(state="readonly")
-
-        self.var_format.trace_add("write", _on_format_change)
-        # initial trigger
-        _on_format_change()
-
-        r = tk.Frame(body, bg=Theme.BG2); r.pack(fill="x", pady=3)
-        tk.Label(r, text="Playback Speed", bg=Theme.BG2, fg=Theme.MUTED,
-                 font=("Helvetica Neue", 10), width=LBL_W, anchor="w").pack(side="left")
-        ttk.Combobox(r, textvariable=self.var_speed, values=[0.5, 0.75, 1.0, 1.1, 1.25, 1.3, 1.5, 1.75, 2.0],
-                     state="readonly", font=("Helvetica Neue", 10), width=8).pack(side="left")
-        tk.Label(r, text="x (Retains pitch, 1.0=Normal)", bg=Theme.BG2, fg=Theme.MUTED,
-                 font=("Helvetica Neue", 9)).pack(side="left", padx=(6,0))
-
-        # Bug 3 FIX: the old playlist/single-video toggle checkbox has been removed.
-        # URL type is now auto-detected from the link structure at download time.
-
-        r = tk.Frame(body, bg=Theme.BG2); r.pack(fill="x", pady=3)
-        tk.Label(r, text="Concurrent DLs", bg=Theme.BG2, fg=Theme.MUTED,
-                 font=("Helvetica Neue", 10), width=LBL_W, anchor="w").pack(side="left")
-        tk.Spinbox(r, textvariable=self.var_concurrent,
-                   from_=1, to=8, width=4, bg=Theme.BG3, fg=Theme.TEXT,
-                   relief="flat", bd=0, font=("Courier New", 10),
-                   insertbackground=Theme.TEXT,
-                   buttonbackground=Theme.BG4).pack(side="left")
-        tk.Label(r, text="(jobs at once)", bg=Theme.BG2, fg=Theme.MUTED,
-                 font=("Helvetica Neue", 9)).pack(side="left", padx=(6,0))
-
-        r = tk.Frame(body, bg=Theme.BG2); r.pack(fill="x", pady=3)
-        tk.Label(r, text="Cookies File", bg=Theme.BG2, fg=Theme.MUTED,
-                 font=("Helvetica Neue", 10), width=LBL_W, anchor="w").pack(side="left")
-        tk.Entry(r, textvariable=self.var_cookiefile,
-                 bg=Theme.BG3, fg=Theme.TEXT, relief="flat", bd=0,
-                 font=("Courier New", 9), insertbackground=Theme.TEXT
-                 ).pack(side="left", fill="x", expand=True, ipady=6, padx=(0, 6))
-        self._small_btn(r, "Clear", self._clear_cookies).pack(side="right", padx=(4, 0))
-        self._small_btn(r, "Browse…", self._browse_cookies).pack(side="right")
-
-        r = tk.Frame(body, bg=Theme.BG2); r.pack(fill="x", pady=3)
-        tk.Label(r, text="Browser Cookies", bg=Theme.BG2, fg=Theme.MUTED,
-                 font=("Helvetica Neue", 10), width=LBL_W, anchor="w").pack(side="left")
-        ttk.Combobox(
-            r,
-            textvariable=self.var_cookies_browser,
-            values=["None", "chrome", "chromium", "edge", "firefox", "opera", "safari"],
-            state="readonly",
-            font=("Helvetica Neue", 10),
-            width=14,
-        ).pack(side="left")
-
-        def _download_deno_cmd():
-            if dependencies.download_deno_if_needed(self):
-                if hasattr(self, 'chk_use_deno'):
-                    self.chk_use_deno.config(state="normal")
-                if hasattr(self, '_check_dependencies'):
-                    self._check_dependencies()
-
-        self._small_btn(r, "Download Deno", _download_deno_cmd).pack(side="right", padx=(4, 0))
-
-        cb_frame = tk.Frame(body, bg=Theme.BG2)
-        cb_frame.pack(fill="x", pady=(8,0))
-        for i, (label, var) in enumerate([
-            ("Embed Thumbnail",  self.var_thumbnail),
-            ("Crop to Square",   self.var_crop_thumb),
-            ("Embed Metadata",   self.var_metadata),
-            ("Number Tracks",    self.var_track_num),
-            ("Skip Existing",    self.var_skip_existing),
-        ]):
-            tk.Checkbutton(cb_frame, text=label, variable=var,
-                           bg=Theme.BG2, fg=Theme.TEXT,
-                           selectcolor=Theme.BG3, activebackground=Theme.BG2,
-                           activeforeground=Theme.TEXT, font=("Helvetica Neue", 10),
-                           bd=0, cursor="hand2", highlightthickness=0
-                           ).grid(row=i//2, column=i%2, sticky="w", padx=(0,12), pady=1)
-
-        deno_state = "normal" if dependencies.get_deno_path() else "disabled"
-        if deno_state == "disabled":
-            self.var_use_deno.set(False)
-
-        self.chk_use_deno = tk.Checkbutton(cb_frame, text="Use Deno", variable=self.var_use_deno,
-                       bg=Theme.BG2, fg=Theme.TEXT, state=deno_state,
-                       selectcolor=Theme.BG3, activebackground=Theme.BG2,
-                       activeforeground=Theme.TEXT, font=("Helvetica Neue", 10),
-                       bd=0, cursor="hand2", highlightthickness=0)
-        self.chk_use_deno.grid(row=2, column=1, sticky="w", padx=(0,12), pady=1)
 
     # ── Progress Section ──────────────────────────────────────────────────────
 

@@ -26,7 +26,7 @@ def url_kind_label(url: str) -> str:
 
 
 def parse_source_line(line: str):
-    text = line.strip()
+    text = line.strip().lstrip("\ufeff")
     if not text or text.startswith("#"):
         return None
     if "|" in text:

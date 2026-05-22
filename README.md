@@ -55,14 +55,16 @@ python main.py --cli --download-dependencies deno # optional
 ```
 
 ```powershell
-python main.py --cli --input sources.txt --output D:\Audiobooks --concurrent 3
+python main.py --cli --input sources.txt --output D:\Audiobooks --concurrent-downloads 3 --concurrent-converts 1
 ```
 
 Single URL example:
 
 ```powershell
-python main.py --cli --url "https://www.youtube.com/watch?v=wzE0qslqRAw" --format m4a --quality he_24
+python main.py --cli --url "https://www.youtube.com/watch?v=wzE0qslqRAw" --format m4a --quality he_24 --volume 1.2
 ```
+
+Downloads are track-level, including inside playlists. New downloads start at least 10 seconds apart by default; adjust this with `--download-start-delay`.
 
 Bypass YouTube blockers using Deno:
 

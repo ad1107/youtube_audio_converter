@@ -7,6 +7,7 @@ from pathlib import Path
 
 from .core.download import DownloadCallbacks, DownloadSettings, run_download_job
 from .core.formatting import fmt_duration, fmt_speed
+from .core.runtime import DownloadRuntime
 from .core.urls import load_sources
 from .dependencies import get_deno_path, get_ffmpeg_path
 from .gui.models import FORMATS, PlaylistJob
@@ -39,7 +40,11 @@ def build_parser():
     parser.add_argument("--format", choices={v for v in FORMATS.values()}, default="m4a", help="Output format")
     parser.add_argument("--quality", default="0", help="Audio quality or HE-AAC preset value")
     parser.add_argument("--speed", type=float, default=1.0, help="Playback speed, e.g. 1.3")
-    parser.add_argument("--concurrent", type=int, default=2, help="Concurrent jobs")
+    parser.add_argument("--concurrent", type=int, default=None, help="Compatibility alias for --concurrent-downloads")
+    parser.add_argument("--concurrent-downloads", type=int, default=2, help="Concurrent track downloads")
+    parser.add_argument("--concurrent-converts", type=int, default=1, help="Concurrent FFmpeg conversions")
+    parser.add_argument("--download-start-delay", type=float, default=10.0, help="Seconds to wait before starting the next download")
+    parser.add_argument("--volume", type=float, default=1.0, help="FFmpeg volume multiplier, e.g. 0.5 or 2.0")
     parser.add_argument("--cookiefile", default="", help="Path to cookies.txt")
     parser.add_argument("--cookies-from-browser", dest="cookies_from_browser", default="", help="Browser name or browser:profile")
     parser.add_argument("--no-thumbnail", action="store_true", help="Do not embed thumbnails")
@@ -79,6 +84,9 @@ def run_cli(args) -> int:
 
     if args.use_deno and not get_deno_path():
         print("[WARNING] --use-deno was set, but Deno was not found in bin/ or PATH.", file=sys.stderr)
+    if args.volume <= 0:
+        print("[ERROR] --volume must be greater than 0.", file=sys.stderr)
+        return 1
 
     jobs = []
     for index, (label, url) in enumerate(sources):
@@ -88,17 +96,27 @@ def run_cli(args) -> int:
             fmt=args.format,
             quality=args.quality,
             speed=args.speed,
+            volume=args.volume,
             job_id=index,
             label=label,
         )
         jobs.append(job)
 
+    download_slots = max(1, args.concurrent if args.concurrent is not None else args.concurrent_downloads)
+    convert_slots = max(1, args.concurrent_converts)
+    start_delay = max(0.0, args.download_start_delay)
+    runtime = DownloadRuntime(download_slots, convert_slots, start_delay)
+
     reporter = ConsoleReporter(verbose=args.verbose)
-    reporter.log("SYSTEM", f"Launching {len(jobs)} job(s), {max(1, args.concurrent)} concurrent", "INFO")
+    reporter.log(
+        "SYSTEM",
+        f"Launching {len(jobs)} source(s), DL {download_slots}, convert {convert_slots}, start gap {start_delay:g}s",
+        "INFO",
+    )
 
     ok_count = 0
-    with ThreadPoolExecutor(max_workers=max(1, args.concurrent)) as executor:
-        future_map = {executor.submit(_run_cli_job, job, args, reporter): job for job in jobs}
+    with ThreadPoolExecutor(max_workers=max(1, len(jobs))) as executor:
+        future_map = {executor.submit(_run_cli_job, job, args, reporter, runtime, download_slots, convert_slots, start_delay): job for job in jobs}
         for future in as_completed(future_map):
             job = future_map[future]
             try:
@@ -113,12 +131,21 @@ def run_cli(args) -> int:
     return 0 if ok_count == len(jobs) else 1
 
 
-def _run_cli_job(job: PlaylistJob, args, reporter: ConsoleReporter):
+def _run_cli_job(
+    job: PlaylistJob,
+    args,
+    reporter: ConsoleReporter,
+    runtime: DownloadRuntime,
+    download_slots: int,
+    convert_slots: int,
+    start_delay: float,
+):
     settings = DownloadSettings(
         output_dir=job.output_dir,
         fmt=job.fmt,
         quality=job.quality,
         speed=job.speed,
+        volume=args.volume,
         cookiefile=args.cookiefile,
         cookies_browser=args.cookies_from_browser,
         use_deno=args.use_deno,
@@ -130,6 +157,10 @@ def _run_cli_job(job: PlaylistJob, args, reporter: ConsoleReporter):
         suppress_js_warnings=True,
         verbose=args.verbose,
         max_retries=5,
+        concurrent_downloads=download_slots,
+        concurrent_converts=convert_slots,
+        download_start_delay=start_delay,
+        runtime=runtime,
     )
 
     def on_download_progress(active_job, item, data):
