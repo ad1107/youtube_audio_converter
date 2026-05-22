@@ -215,6 +215,8 @@ def _download_item(job, item: DownloadItem, settings: DownloadSettings, callback
 
         download_slot_acquired = False
         download_slot_released = False
+        postprocess_slot_acquired = False
+        postprocess_slot_released = False
 
         def release_download_slot():
             nonlocal download_slot_released
@@ -222,12 +224,31 @@ def _download_item(job, item: DownloadItem, settings: DownloadSettings, callback
                 settings.runtime.download_gate.release()
                 download_slot_released = True
 
+        def release_postprocess_slot():
+            nonlocal postprocess_slot_released
+            if postprocess_slot_acquired and not postprocess_slot_released:
+                settings.runtime.conversion_gate.release()
+                postprocess_slot_released = True
+
+        def acquire_postprocess_slot(data: dict) -> bool:
+            nonlocal postprocess_slot_acquired
+            if postprocess_slot_acquired:
+                return True
+            callbacks.on_postprocessor(job, item, {**data, "status": "waiting"})
+            while not callbacks.is_cancelled():
+                if settings.runtime.conversion_gate.acquire(timeout=0.2):
+                    postprocess_slot_acquired = True
+                    return True
+            return False
+
         def progress_hook(data, j=job, it=item):
             _download_progress(callbacks, j, it, data)
 
         def postprocessor_hook(data, j=job, it=item):
             if data.get("status") == "started":
                 release_download_slot()
+                if data.get("postprocessor") != "MoveFiles" and not acquire_postprocess_slot(data):
+                    raise yt_dlp.utils.DownloadError("Cancelled by user")
             callbacks.on_postprocessor(j, it, data)
 
         ydl_opts = build_ydl_options(
@@ -251,7 +272,6 @@ def _download_item(job, item: DownloadItem, settings: DownloadSettings, callback
 
             with ffmpeg_progress_context(
                 lambda progress, j=job, it=item: callbacks.on_ffmpeg_progress(j, it, progress),
-                conversion_gate=settings.runtime.conversion_gate,
             ):
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     result = ydl.download([item.url])
@@ -268,6 +288,7 @@ def _download_item(job, item: DownloadItem, settings: DownloadSettings, callback
             last_error = str(exc)
         finally:
             release_download_slot()
+            release_postprocess_slot()
 
         if last_error:
             callbacks.log(job.playlist_title, f"{item.title}: {last_error}", "ERROR")

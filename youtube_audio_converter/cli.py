@@ -18,12 +18,17 @@ class ConsoleReporter:
     def __init__(self, verbose: bool = False):
         self.verbose = verbose
         self._lock = threading.Lock()
+        for stream in (sys.stdout, sys.stderr):
+            if hasattr(stream, "reconfigure"):
+                try:
+                    stream.reconfigure(encoding="utf-8", errors="replace")
+                except OSError:
+                    pass
 
     def log(self, source: str, message: str, level: str = "INFO"):
         stream = sys.stderr if level in {"ERROR", "WARNING"} else sys.stdout
-        encoding = getattr(stream, "encoding", None) or "utf-8"
-        message = str(message).encode(encoding, errors="replace").decode(encoding, errors="replace")
-        source = str(source or "").encode(encoding, errors="replace").decode(encoding, errors="replace")
+        message = str(message)
+        source = str(source or "")
         with self._lock:
             if source and source.upper() != "SYSTEM":
                 print(f"[{level:<8s}] [{source[:38]:<38s}] {message}", file=stream, flush=True)
@@ -227,14 +232,39 @@ def _run_cli_job(
         speed_text = f" {progress.speed}" if progress.speed else ""
         reporter.log(
             active_job.playlist_title,
-            f"FFmpeg {fmt_duration(progress.time_seconds)}{pct_text}{speed_text}",
+            f"FFmpeg {item.index:02d} - {item.title[:32]} {fmt_duration(progress.time_seconds)}{pct_text}{speed_text}",
             "PROGRESS",
         )
+
+    def on_postprocessor(active_job, item, data):
+        status = data.get("status")
+        processor = data.get("postprocessor", "unknown")
+        labels = {
+            "ExtractAudio": "Extracting audio with FFmpeg",
+            "Merger": "Muxing video and audio",
+            "VideoConvertor": "Converting video container",
+            "Metadata": "Writing metadata tags",
+            "ThumbnailsConvertor": "Converting artwork to JPEG",
+            "EmbedThumbnail": "Embedding artwork into file",
+            "MoveFiles": "Moving final file",
+        }
+        label = labels.get(processor, f"Post-processing: {processor}")
+        seen_attr = f"_cli_pp_{status}_seen"
+        seen = getattr(item, seen_attr, set())
+        if processor in seen:
+            return
+        seen.add(processor)
+        setattr(item, seen_attr, seen)
+        if status == "waiting":
+            reporter.log(active_job.playlist_title, f"Waiting for convert slot: {label}", "INFO")
+        elif status == "started":
+            reporter.log(active_job.playlist_title, f"{label}...", "INFO")
 
     callbacks = DownloadCallbacks(
         log=reporter.log,
         on_item_done=lambda active_job, item, path: reporter.log(active_job.playlist_title, f"Saved: {item.title}", "SUCCESS"),
         on_download_progress=on_download_progress,
+        on_postprocessor=on_postprocessor,
         on_ffmpeg_progress=on_ffmpeg_progress,
     )
 

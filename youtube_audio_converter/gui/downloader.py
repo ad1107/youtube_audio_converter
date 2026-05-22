@@ -257,12 +257,42 @@ class GUIDownloaderMixin:
             "Metadata": "Writing metadata tags",
             "ThumbnailsConvertor": "Converting artwork to JPEG",
             "EmbedThumbnail": "Embedding artwork into file",
+            "MoveFiles": "Moving final file",
         }
         label = labels.get(processor, f"Post-processing: {processor}")
+        progress_processors = {"ExtractAudio", "Merger", "VideoConvertor"}
+        finalizing_processors = {
+            "Metadata",
+            "ThumbnailsConvertor",
+            "EmbedThumbnail",
+            "MoveFiles",
+        }
 
-        if status == "started":
+        seen_attr = {
+            "waiting": "_pp_waiting_seen",
+            "started": "_pp_started_seen",
+            "finished": "_pp_finished_seen",
+        }.get(status)
+        if seen_attr:
+            seen = getattr(item, seen_attr, set())
+            if processor in seen:
+                return
+            seen.add(processor)
+            setattr(item, seen_attr, seen)
+
+        if status == "waiting":
+            self.log(job.playlist_title, f"Waiting for convert slot: {label}...", "INFO")
+            self._set_active_progress(
+                job,
+                item,
+                "convert",
+                0,
+                "Waiting convert slot",
+                f"Waiting for convert slot: {label} | Output: {item.expected_path}",
+            )
+        elif status == "started":
             self.log(job.playlist_title, f"{label}...", "INFO")
-            if processor in {"ExtractAudio", "Merger", "VideoConvertor"}:
+            if processor in progress_processors:
                 duration = item.duration or float((data.get("info_dict") or {}).get("duration") or 0)
                 item.duration = duration
                 if duration:
@@ -285,8 +315,27 @@ class GUIDownloaderMixin:
                     "Converting",
                     f"{label}: {item.expected_path}",
                 )
-        elif status == "finished" and processor in {"ExtractAudio", "Merger", "VideoConvertor"}:
+            elif processor in finalizing_processors:
+                self._set_active_progress(
+                    job,
+                    item,
+                    "convert",
+                    100,
+                    label,
+                    f"{label}: {item.expected_path}",
+                )
+                self.after(0, lambda it=item, stage=label: self.lbl_current.config(text=f"{stage}: {it.title[:52]}"))
+        elif status == "finished":
             self.log(job.playlist_title, f"{label} complete", "SUCCESS")
+            if processor in finalizing_processors:
+                self._set_active_progress(
+                    job,
+                    item,
+                    "convert",
+                    100,
+                    "Finalizing",
+                    f"{label} complete: {item.expected_path}",
+                )
 
     def _ffmpeg_progress_hook(self, job: PlaylistJob, item, progress):
         if getattr(progress, "completed", False):
@@ -324,7 +373,7 @@ class GUIDownloaderMixin:
         size_text = f"  {progress.size}" if progress.size else ""
         self.log(
             job.playlist_title,
-            f"FFmpeg {fmt_duration(progress.time_seconds)}{pct_text}{speed_text}{size_text}",
+            f"FFmpeg {item.index:02d} - {item.title[:32]} {fmt_duration(progress.time_seconds)}{pct_text}{speed_text}{size_text}",
             "PROGRESS",
         )
 
