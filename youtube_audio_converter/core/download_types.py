@@ -15,6 +15,29 @@ def noop(*args, **kwargs):
 
 
 @dataclass
+class PlaylistJob:
+    url: str
+    output_dir: str
+    fmt: str
+    quality: str
+    job_id: int
+    label: str | None = None
+    speed: float = 1.0
+    volume: float = 1.0
+    playlist_title: str = "Fetching..."
+    total_videos: int = 0
+    completed_videos: int = 0
+    failed_videos: int = 0
+    status: str = "pending"
+    error_msg: str = ""
+    start_time: float = 0.0
+    end_time: float = 0.0
+    output_folder: str = ""
+    _last_prog_log: float = 0.0
+    _last_ffmpeg_prog_log: float = 0.0
+
+
+@dataclass
 class DownloadSettings:
     output_dir: str
     fmt: str

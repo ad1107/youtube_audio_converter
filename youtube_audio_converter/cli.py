@@ -6,14 +6,13 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from .core.download import run_download_job
-from .core.download_types import DownloadCallbacks, DownloadSettings
+from .core.download_types import DownloadCallbacks, DownloadSettings, PlaylistJob
 from .core.formats import FORMAT_SPECS, format_codes, normalize_quality, quality_options_for_format
 from .core.formatting import fmt_duration, fmt_speed
 from .core.postprocessor_labels import postprocessor_label
 from .core.runtime import DownloadRuntime
 from .core.urls import load_sources
 from .dependencies import get_deno_path, get_ffmpeg_path
-from .gui.models import PlaylistJob
 
 
 class ConsoleReporter:

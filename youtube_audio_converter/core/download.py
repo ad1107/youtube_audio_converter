@@ -312,6 +312,7 @@ def _make_item(entry: dict, job, settings: DownloadSettings, index: int, is_play
         info=info,
     )
 
+
 def _record_failure(
     job,
     failures: list[FailedItem],

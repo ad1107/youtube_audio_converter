@@ -6,12 +6,15 @@ from datetime import datetime
 from pathlib import Path
 import tkinter as tk
 
+from yt_dlp.version import __version__ as YTDLP_VERSION
+
 from youtube_audio_converter import __version__
+from youtube_audio_converter.core.download_types import PlaylistJob
 from youtube_audio_converter.dependencies import get_deno_path, get_ffmpeg_path
 from .builder import GUIBuilderMixin
 from .downloader import GUIDownloaderMixin
 from .log_view import GUILogMixin
-from .models import FORMATS, QUALITIES, PlaylistJob, Theme, YTDLP_VERSION
+from .models import FORMATS, QUALITIES, Theme
 from .power import GUIPowerMixin
 from .progress import GUIProgressMixin
 from .settings import GUISettingsMixin
@@ -41,6 +44,7 @@ class YoutubeAudioConverter(
         self.playlist_row_widgets: list[tuple] = []
         self.job_progress_widgets: dict[int, dict] = {}
         self.item_progress_widgets: dict[str, dict] = {}
+        self.item_progress_states: dict[str, dict] = {}
 
         self.var_output_dir = tk.StringVar(value=str(Path.home() / "Music" / "AudioBooks"))
         self.var_format = tk.StringVar(value=list(FORMATS.keys())[0])
@@ -56,6 +60,7 @@ class YoutubeAudioConverter(
         self.var_use_deno = tk.BooleanVar(value=False)
         self.var_autoscroll = tk.BooleanVar(value=True)
         self.var_suppress_js = tk.BooleanVar(value=True)
+        self.var_hide_inactive_tasks = tk.BooleanVar(value=True)
         self.var_run_view = tk.StringVar(value="progress")
         self.var_thumbnail = tk.BooleanVar(value=True)
         self.var_crop_thumb = tk.BooleanVar(value=True)

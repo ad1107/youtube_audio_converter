@@ -5,6 +5,61 @@ from .models import Theme
 
 
 class GUIProgressMixin:
+    def _build_progress_view(self, parent):
+        summary = tk.Frame(parent, bg=Theme.BG2)
+        summary.pack(fill="x")
+        self.lbl_current = tk.Label(
+            summary,
+            text="Idle",
+            bg=Theme.BG2,
+            fg=Theme.MUTED,
+            font=("Courier New", 8),
+            anchor="w",
+        )
+        self.lbl_current.pack(side="left", fill="x", expand=True)
+        tk.Checkbutton(
+            summary,
+            text="Hide inactive tasks",
+            variable=self.var_hide_inactive_tasks,
+            command=self._on_hide_inactive_tasks_changed,
+            bg=Theme.BG2,
+            fg=Theme.TEXT,
+            selectcolor=Theme.BG3,
+            activebackground=Theme.BG2,
+            activeforeground=Theme.TEXT,
+            font=("Helvetica Neue", 9),
+            relief="flat",
+            bd=0,
+            highlightthickness=0,
+        ).pack(side="right", padx=(10, 0))
+        self.lbl_progress_count = tk.Label(
+            summary,
+            text="0 / 0 files",
+            bg=Theme.BG2,
+            fg=Theme.MUTED,
+            font=("Courier New", 9),
+        )
+        self.lbl_progress_count.pack(side="right")
+
+        self.pb_overall = ttk.Progressbar(parent, mode="determinate", style="Horizontal.TProgressbar")
+        self.pb_overall.pack(fill="x", pady=(6, 10))
+
+        active_outer = tk.Frame(parent, bg=Theme.BG2)
+        active_outer.pack(fill="both", expand=True)
+        self.progress_canvas = tk.Canvas(active_outer, bg=Theme.BG2, highlightthickness=0)
+        self.progress_scrollbar = ttk.Scrollbar(active_outer, orient="vertical", command=self.progress_canvas.yview)
+        self.active_progress_frame = tk.Frame(self.progress_canvas, bg=Theme.BG2)
+        self.active_progress_frame.bind("<Configure>", lambda event: self._schedule_progress_scrollregion_update())
+        self.progress_canvas_window = self.progress_canvas.create_window((0, 0), window=self.active_progress_frame, anchor="nw")
+        self.progress_canvas.bind("<Configure>", self._on_progress_canvas_configure)
+        self.progress_canvas.configure(yscrollcommand=self.progress_scrollbar.set)
+        self.progress_canvas.pack(side="left", fill="both", expand=True)
+        self.progress_scrollbar.pack(side="right", fill="y")
+
+    def _on_progress_canvas_configure(self, event):
+        self.progress_canvas.itemconfig(self.progress_canvas_window, width=event.width)
+        self._schedule_progress_scrollregion_update()
+
     def _show_run_view(self, view: str):
         self.var_run_view.set(view)
         if view == "log":
@@ -24,6 +79,10 @@ class GUIProgressMixin:
             widget.destroy()
         self.job_progress_widgets = {}
         self.item_progress_widgets = {}
+        self.item_progress_states = {}
+
+    def _on_hide_inactive_tasks_changed(self):
+        self._refresh_item_progress_visibility()
 
     def _progress_key(self, job, item) -> str:
         return f"{job.job_id}:{item.index}"
@@ -45,19 +104,34 @@ class GUIProgressMixin:
 
         self.after(0, apply)
 
-    def _set_active_progress(self, job, item, phase: str, percent: float | None, status: str, detail: str = ""):
+    def _set_active_progress(
+        self,
+        job,
+        item,
+        phase: str,
+        percent: float | None,
+        status: str,
+        detail: str = "",
+        active: bool = True,
+    ):
         key = self._progress_key(job, item)
 
         def apply():
             self._ensure_job_progress_widget(job)
-            widgets = self._ensure_item_progress_widget(key, job, item)
             style = "Convert.Horizontal.TProgressbar" if phase == "convert" else "Download.Horizontal.TProgressbar"
-            widgets["bar"].configure(style=style, mode="determinate")
-            if percent is not None:
-                widgets["bar"].configure(value=max(0, min(100, percent)))
-            widgets["status"].config(text=status)
-            if detail:
-                widgets["detail"].config(text=detail)
+            self._save_item_progress_state(
+                key=key,
+                job=job,
+                item=item,
+                phase=phase,
+                percent=percent,
+                status=status,
+                detail=detail,
+                bar_style=style,
+                title_fg=Theme.TEXT,
+                active=active,
+            )
+            self._sync_item_progress_widget(key)
 
         self.after(0, apply)
 
@@ -65,11 +139,19 @@ class GUIProgressMixin:
         key = self._progress_key(job, item)
 
         def apply():
-            widgets = self._ensure_item_progress_widget(key, job, item)
-            widgets["bar"].configure(style="Green.Horizontal.TProgressbar", value=100)
-            widgets["status"].config(text="Done")
-            widgets["title"].config(fg=Theme.GREEN)
-            widgets["detail"].config(text=detail)
+            self._save_item_progress_state(
+                key=key,
+                job=job,
+                item=item,
+                phase="done",
+                percent=100,
+                status="Done",
+                detail=detail,
+                bar_style="Green.Horizontal.TProgressbar",
+                title_fg=Theme.GREEN,
+                active=False,
+            )
+            self._sync_item_progress_widget(key)
 
         self.after(0, apply)
 
@@ -77,11 +159,19 @@ class GUIProgressMixin:
         key = self._progress_key(job, item)
 
         def apply():
-            widgets = self._ensure_item_progress_widget(key, job, item)
-            widgets["bar"].configure(style="Green.Horizontal.TProgressbar", value=100)
-            widgets["status"].config(text="Skipped")
-            widgets["title"].config(fg=Theme.MUTED)
-            widgets["detail"].config(text=detail)
+            self._save_item_progress_state(
+                key=key,
+                job=job,
+                item=item,
+                phase="skipped",
+                percent=100,
+                status="Skipped",
+                detail=detail,
+                bar_style="Green.Horizontal.TProgressbar",
+                title_fg=Theme.MUTED,
+                active=False,
+            )
+            self._sync_item_progress_widget(key)
 
         self.after(0, apply)
 
@@ -91,13 +181,122 @@ class GUIProgressMixin:
         key = self._progress_key(job, item)
 
         def apply():
-            widgets = self._ensure_item_progress_widget(key, job, item)
-            widgets["bar"].configure(style="Error.Horizontal.TProgressbar", value=100)
-            widgets["status"].config(text=status)
-            widgets["title"].config(fg=Theme.RED)
-            widgets["detail"].config(text=f"Source: {item.url}")
+            self._save_item_progress_state(
+                key=key,
+                job=job,
+                item=item,
+                phase="failed",
+                percent=100,
+                status=status,
+                detail=f"Source: {item.url}",
+                bar_style="Error.Horizontal.TProgressbar",
+                title_fg=Theme.RED,
+                active=False,
+            )
+            self._sync_item_progress_widget(key)
 
         self.after(0, apply)
+
+    def _save_item_progress_state(
+        self,
+        key: str,
+        job,
+        item,
+        phase: str,
+        percent: float | None,
+        status: str,
+        detail: str,
+        bar_style: str,
+        title_fg: str,
+        active: bool,
+    ) -> dict:
+        state = self.item_progress_states.get(key, {})
+        state.update(
+            {
+                "job": job,
+                "item": item,
+                "phase": phase,
+                "percent": percent,
+                "status": status,
+                "detail": detail,
+                "bar_style": bar_style,
+                "title_fg": title_fg,
+                "active": active,
+            }
+        )
+        self.item_progress_states[key] = state
+        return state
+
+    def _sync_item_progress_widget(self, key: str):
+        state = self.item_progress_states.get(key)
+        if not state:
+            return
+
+        if self._should_hide_item_progress(state):
+            self._destroy_item_progress_widget(key)
+            self._schedule_progress_scrollregion_update()
+            return
+
+        widgets = self._ensure_item_progress_widget(key, state["job"], state["item"])
+        self._pack_item_progress_widget(widgets)
+        self._apply_item_progress_state(widgets, state)
+        self._schedule_progress_scrollregion_update()
+
+    def _refresh_item_progress_visibility(self):
+        for widgets in list(self.item_progress_widgets.values()):
+            widgets["frame"].pack_forget()
+        for key in sorted(self.item_progress_states, key=self._progress_sort_key):
+            self._sync_item_progress_widget(key)
+        self._schedule_progress_scrollregion_update()
+
+    def _progress_sort_key(self, key: str) -> tuple[int, int]:
+        try:
+            job_id, item_index = key.split(":", 1)
+            return int(job_id), int(item_index)
+        except (TypeError, ValueError):
+            return 0, 0
+
+    def _should_hide_item_progress(self, state: dict) -> bool:
+        return bool(self.var_hide_inactive_tasks.get() and not state.get("active"))
+
+    def _pack_item_progress_widget(self, widgets: dict):
+        if not widgets["frame"].winfo_manager():
+            widgets["frame"].pack(fill="x", pady=(0, 8))
+
+    def _destroy_item_progress_widget(self, key: str):
+        widgets = self.item_progress_widgets.pop(key, None)
+        if widgets:
+            parent = widgets["frame"].master
+            widgets["frame"].destroy()
+            self._collapse_empty_items_frame(parent)
+
+    def _collapse_empty_items_frame(self, frame):
+        if frame and not frame.winfo_children():
+            frame.configure(height=1)
+
+    def _schedule_progress_scrollregion_update(self):
+        if getattr(self, "_progress_scrollregion_pending", False):
+            return
+        self._progress_scrollregion_pending = True
+        self.after_idle(self._update_progress_scrollregion)
+
+    def _update_progress_scrollregion(self):
+        self._progress_scrollregion_pending = False
+        try:
+            self.update_idletasks()
+            self.progress_canvas.configure(scrollregion=self.progress_canvas.bbox("all") or (0, 0, 0, 0))
+        except tk.TclError:
+            pass
+
+    def _apply_item_progress_state(self, widgets: dict, state: dict):
+        widgets["bar"].configure(style=state["bar_style"], mode="determinate")
+        percent = state.get("percent")
+        if percent is not None:
+            widgets["bar"].configure(value=max(0, min(100, percent)))
+        widgets["status"].config(text=state["status"])
+        widgets["title"].config(fg=state["title_fg"])
+        if state.get("detail"):
+            widgets["detail"].config(text=state["detail"])
 
     def _ensure_job_progress_widget(self, job) -> dict:
         widgets = self.job_progress_widgets.get(job.job_id)

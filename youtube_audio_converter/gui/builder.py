@@ -4,7 +4,7 @@ import sys
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-from .models import LOG_COLOURS, Theme
+from .models import Theme
 
 
 class GUIBuilderMixin:
@@ -251,54 +251,6 @@ class GUIBuilderMixin:
         self._build_progress_view(self.progress_view_frame)
         self._build_log_view(self.log_view_frame)
         self._show_run_view("progress")
-
-    def _build_progress_view(self, parent):
-        summary = tk.Frame(parent, bg=Theme.BG2)
-        summary.pack(fill="x")
-        self.lbl_current = tk.Label(summary, text="Idle", bg=Theme.BG2, fg=Theme.MUTED, font=("Courier New", 8), anchor="w")
-        self.lbl_current.pack(side="left", fill="x", expand=True)
-        self.lbl_progress_count = tk.Label(summary, text="0 / 0 files", bg=Theme.BG2, fg=Theme.MUTED, font=("Courier New", 9))
-        self.lbl_progress_count.pack(side="right")
-
-        self.pb_overall = ttk.Progressbar(parent, mode="determinate", style="Horizontal.TProgressbar")
-        self.pb_overall.pack(fill="x", pady=(6, 10))
-
-        active_outer = tk.Frame(parent, bg=Theme.BG2)
-        active_outer.pack(fill="both", expand=True)
-        self.progress_canvas = tk.Canvas(active_outer, bg=Theme.BG2, highlightthickness=0)
-        self.progress_scrollbar = ttk.Scrollbar(active_outer, orient="vertical", command=self.progress_canvas.yview)
-        self.active_progress_frame = tk.Frame(self.progress_canvas, bg=Theme.BG2)
-        self.active_progress_frame.bind("<Configure>", lambda event: self.progress_canvas.configure(scrollregion=self.progress_canvas.bbox("all")))
-        self.progress_canvas_window = self.progress_canvas.create_window((0, 0), window=self.active_progress_frame, anchor="nw")
-        self.progress_canvas.bind("<Configure>", lambda event: self.progress_canvas.itemconfig(self.progress_canvas_window, width=event.width))
-        self.progress_canvas.configure(yscrollcommand=self.progress_scrollbar.set)
-        self.progress_canvas.pack(side="left", fill="both", expand=True)
-        self.progress_scrollbar.pack(side="right", fill="y")
-
-    def _build_log_view(self, parent):
-        self.log_text = tk.Text(
-            parent,
-            bg=Theme.BG2,
-            fg=Theme.TEXT,
-            font=("Courier New", 9),
-            relief="flat",
-            bd=0,
-            padx=10,
-            pady=8,
-            wrap="word",
-            state="disabled",
-            cursor="arrow",
-            insertbackground=Theme.TEXT,
-            selectbackground=Theme.BG4,
-        )
-        scrollbar = ttk.Scrollbar(parent, command=self.log_text.yview)
-        self.log_text.configure(yscrollcommand=scrollbar.set)
-        scrollbar.pack(side="right", fill="y")
-        self.log_text.pack(fill="both", expand=True)
-        for level, colour in LOG_COLOURS.items():
-            self.log_text.tag_configure(level, foreground=colour)
-        self.log_text.tag_configure("TS", foreground="#3d4a6a")
-        self.log_text.tag_configure("SRC", foreground=Theme.PURPLE)
 
     def _build_bottom_bar(self):
         bar = tk.Frame(self, bg=Theme.BG, pady=12)

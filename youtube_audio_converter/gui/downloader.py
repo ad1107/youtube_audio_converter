@@ -11,7 +11,7 @@ except ImportError:
     yt_dlp = None
 
 from youtube_audio_converter.core.download import run_download_job, summarize_elapsed
-from youtube_audio_converter.core.download_types import DownloadCallbacks, DownloadSettings
+from youtube_audio_converter.core.download_types import DownloadCallbacks, DownloadSettings, PlaylistJob
 from youtube_audio_converter.core.formats import normalize_quality, quality_label_map, supports_audio_filters
 from youtube_audio_converter.core.formatting import fmt_duration, fmt_speed
 from youtube_audio_converter.core.postprocessor_labels import (
@@ -22,7 +22,7 @@ from youtube_audio_converter.core.postprocessor_labels import (
 from youtube_audio_converter.core.runtime import DownloadRuntime
 from youtube_audio_converter.core.urls import parse_source_line
 from youtube_audio_converter.dependencies import get_ffmpeg_path
-from .models import FORMATS, PlaylistJob, Theme
+from .models import FORMATS, Theme
 
 
 class GUIDownloaderMixin:
@@ -195,7 +195,7 @@ class GUIDownloaderMixin:
 
     def _on_item_queued(self, job: PlaylistJob, item, index: int):
         self.after(0, lambda j=job, it=item: self.lbl_current.config(text=f"{j.playlist_title}: queued {it.title[:52]}"))
-        self._set_active_progress(job, item, "download", 0, "Queued", f"Source: {item.url}")
+        self._set_active_progress(job, item, "download", 0, "Queued", f"Source: {item.url}", active=False)
 
     def _on_item_started(self, job: PlaylistJob, item, index: int):
         self.after(0, lambda j=job, it=item: self.lbl_current.config(text=f"{j.playlist_title}: {it.title[:52]}"))
