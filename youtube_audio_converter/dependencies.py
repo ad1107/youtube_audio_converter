@@ -1,234 +1,218 @@
+import json
 import os
-import sys
 import shutil
+import subprocess
+import sys
+import time
 import urllib.request
 import zipfile
-import time
-import tkinter as tk
-from tkinter import ttk, messagebox
 from pathlib import Path
+from tkinter import messagebox, ttk
+import tkinter as tk
+
+
+FFMPEG_RELEASE_API = "https://api.github.com/repos/AnimMouse/ffmpeg-autobuild/releases/latest"
+SEVEN_Z_URL = "https://github.com/ip7z/7zip/releases/download/26.01/7zr.exe"
+DENO_WINDOWS_URL = "https://github.com/denoland/deno/releases/latest/download/deno-x86_64-pc-windows-msvc.zip"
+
 
 def get_local_bin_path() -> Path:
-    if getattr(sys, 'frozen', False):
-        # Running inside PyInstaller / compiled context
-        # Put it strictly in a "bin" folder right next to the .exe file
+    if getattr(sys, "frozen", False):
         return Path(sys.executable).parent / "bin"
     return Path(__file__).resolve().parent.parent / "bin"
+
 
 def get_ffmpeg_path() -> str:
     sys_ffmpeg = shutil.which("ffmpeg")
     if sys_ffmpeg:
         return sys_ffmpeg
-    local_bin = get_local_bin_path()
-    local_ffmpeg = local_bin / "ffmpeg.exe" if sys.platform == "win32" else local_bin / "ffmpeg"
+
+    local_ffmpeg = _local_executable("ffmpeg")
     if local_ffmpeg.exists():
-        os.environ["PATH"] = str(local_bin) + os.pathsep + os.environ.get("PATH", "")
+        _prepend_path(local_ffmpeg.parent)
         return str(local_ffmpeg)
     return ""
 
-def download_ffmpeg_if_needed(parent=None):
-    if get_ffmpeg_path():
-        return True
-    
-    local_bin = get_local_bin_path()
-    local_bin.mkdir(parents=True, exist_ok=True)
-
-    popup = tk.Toplevel(parent) if parent else tk.Tk()
-    popup.title("Auto-Downloading FFmpeg")
-    popup.geometry("380x150")
-    if parent:
-        popup.transient(parent)
-    popup.grab_set()
-    popup.focus_force()
-
-    lbl_title = tk.Label(popup, text="Configuring FFmpeg Environment...", font=("Helvetica Neue", 11, "bold"))
-    lbl_title.pack(pady=(15, 5))
-
-    progress = ttk.Progressbar(popup, orient="horizontal", length=300, mode="determinate")
-    progress.pack(pady=5)
-
-    lbl_status = tk.Label(popup, text="Starting download...", font=("Courier New", 9))
-    lbl_status.pack(pady=5)
-
-    start_time = [time.time()]
-
-    def reporthook(blocknum, blocksize, totalsize):
-        if blocknum == 0:
-            start_time[0] = time.time()
-            return
-        elapsed = time.time() - start_time[0]
-        current = blocknum * blocksize
-        pct = min(current * 100.0 / totalsize, 100) if totalsize > 0 else 0
-        
-        avg_speed = (current / elapsed) if elapsed > 0 else 0
-        
-        downloaded_mb = current / (1024 * 1024)
-        total_mb = totalsize / (1024 * 1024) if totalsize > 0 else 0
-        
-        if avg_speed >= 1024 * 1024:
-            speed_str = f"{avg_speed/(1024*1024):.1f} MB/s"
-        else:
-            speed_str = f"{avg_speed/1024:.1f} KB/s"
-            
-        lbl_status.config(text=f"{pct:.0f}% | {downloaded_mb:.1f}/{total_mb:.1f}MB | {speed_str}")
-        progress["value"] = pct
-        popup.update()
-
-    try:
-        popup.update()
-        if sys.platform == "win32":
-            import subprocess
-            import json
-
-            # Step 1: Download 7zr.exe (standalone, no extraction needed)
-            lbl_status.config(text="Fetching extractor...")
-            popup.update()
-            sza_path = local_bin / "7zr.exe"
-            urllib.request.urlretrieve(
-                "https://github.com/ip7z/7zip/releases/download/26.01/7zr.exe",
-                sza_path
-            )
-
-            # Step 2: Resolve latest ffmpeg-autobuild release URL dynamically
-            lbl_status.config(text="Resolving latest FFmpeg build...")
-            popup.update()
-            api_url = "https://api.github.com/repos/AnimMouse/ffmpeg-autobuild/releases/latest"
-            req = urllib.request.Request(api_url, headers={"User-Agent": "Mozilla/5.0"})
-            with urllib.request.urlopen(req) as r:
-                release = json.loads(r.read())
-            asset = next(a for a in release["assets"] if "win64-nonfree" in a["name"])
-            url = asset["browser_download_url"]
-
-            # Step 3: Download the archive
-            archive_path = local_bin / "ffmpeg.7z"
-            urllib.request.urlretrieve(url, archive_path, reporthook)
-
-            # Step 4: Extract ffmpeg.exe and ffprobe.exe
-            lbl_status.config(text="Extracting archive...")
-            popup.update()
-            subprocess.run(
-                [str(sza_path), "e", str(archive_path), "-o" + str(local_bin), "*.exe", "-r", "-y"],
-                check=True, capture_output=True
-            )
-
-            # Cleanup
-            archive_path.unlink()
-            sza_path.unlink()
-        elif sys.platform == "darwin":
-            url = "https://evermeet.cx/ffmpeg/getrelease/zip"
-            zip_path = local_bin / "ffmpeg.zip"
-            urllib.request.urlretrieve(url, zip_path, reporthook)
-            lbl_status.config(text="Extracting archive...")
-            popup.update()
-            with zipfile.ZipFile(zip_path, 'r') as z:
-                z.extractall(local_bin)
-            zip_path.unlink()
-            (local_bin / "ffmpeg").chmod(0o755)
-        else:
-            import tarfile
-            url = "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz"
-            tar_path = local_bin / "ffmpeg.tar.xz"
-            urllib.request.urlretrieve(url, tar_path, reporthook)
-            lbl_status.config(text="Extracting archive...")
-            popup.update()
-            with tarfile.open(tar_path, "r:xz") as t:
-                for member in t.getmembers():
-                    if member.name.endswith("ffmpeg") or member.name.endswith("ffprobe"):
-                        member.name = Path(member.name).name
-                        t.extract(member, local_bin)
-            tar_path.unlink()
-            (local_bin / "ffmpeg").chmod(0o755)
-            
-        os.environ["PATH"] = str(local_bin) + os.pathsep + os.environ.get("PATH", "")
-        time.sleep(0.3)
-        popup.destroy()
-        return True
-    except Exception as e:
-        messagebox.showerror("FFmpeg Download Error", f"Failed to download FFmpeg:\n{e}", parent=popup)
-        popup.destroy()
-        return False
 
 def get_deno_path() -> str:
-    local_bin = get_local_bin_path()
-    local_deno = local_bin / "deno.exe" if sys.platform == "win32" else local_bin / "deno"
+    local_deno = _local_executable("deno")
     if local_deno.exists():
         return str(local_deno)
+
     sys_deno = shutil.which("deno")
     if sys_deno:
         return sys_deno
     return ""
 
+
+def download_ffmpeg_if_needed(parent=None):
+    if get_ffmpeg_path():
+        return True
+
+    local_bin = _ensure_local_bin()
+    popup = _ProgressPopup(parent, "Auto-Downloading FFmpeg", "Configuring FFmpeg Environment...")
+    try:
+        if sys.platform == "win32":
+            _install_ffmpeg_windows(local_bin, popup)
+        elif sys.platform == "darwin":
+            _install_ffmpeg_macos(local_bin, popup)
+        else:
+            _install_ffmpeg_linux(local_bin, popup)
+
+        _prepend_path(local_bin)
+        popup.close()
+        return True
+    except Exception as exc:
+        popup.show_error("FFmpeg Download Error", f"Failed to download FFmpeg:\n{exc}")
+        return False
+
+
 def download_deno_if_needed(parent=None):
     if get_deno_path():
         return True
-    
+
+    local_bin = _ensure_local_bin()
+    popup = _ProgressPopup(parent, "Downloading Deno", "Setting up Deno Environment...")
+    try:
+        _install_deno_windows(local_bin, popup)
+        popup.close()
+        return True
+    except Exception as exc:
+        popup.show_error("Deno Download Error", f"Failed to download Deno:\n{exc}")
+        return False
+
+
+def _local_executable(name: str) -> Path:
+    suffix = ".exe" if sys.platform == "win32" else ""
+    return get_local_bin_path() / f"{name}{suffix}"
+
+
+def _ensure_local_bin() -> Path:
     local_bin = get_local_bin_path()
     local_bin.mkdir(parents=True, exist_ok=True)
+    return local_bin
 
-    popup = tk.Toplevel(parent) if parent else tk.Tk()
-    popup.title("Downloading Deno")
-    popup.geometry("380x150")
-    if parent:
-        popup.transient(parent)
-    popup.grab_set()
-    popup.focus_force()
 
-    lbl_title = tk.Label(popup, text="Setting up Deno Environment...", font=("Helvetica Neue", 11, "bold"))
-    lbl_title.pack(pady=(15, 5))
+def _prepend_path(path: Path) -> None:
+    path_text = str(path)
+    parts = os.environ.get("PATH", "").split(os.pathsep)
+    if path_text not in parts:
+        os.environ["PATH"] = path_text + os.pathsep + os.environ.get("PATH", "")
 
-    progress = ttk.Progressbar(popup, orient="horizontal", length=300, mode="determinate")
-    progress.pack(pady=5)
 
-    lbl_status = tk.Label(popup, text="Starting download...", font=("Courier New", 9))
-    lbl_status.pack(pady=5)
+def _creationflags() -> int:
+    return subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 
-    start_time = [time.time()]
 
-    def reporthook(blocknum, blocksize, totalsize):
+class _ProgressPopup:
+    def __init__(self, parent, title: str, heading: str):
+        self.popup = tk.Toplevel(parent) if parent else tk.Tk()
+        self.popup.title(title)
+        self.popup.geometry("380x150")
+        if parent:
+            self.popup.transient(parent)
+        self.popup.grab_set()
+        self.popup.focus_force()
+
+        tk.Label(self.popup, text=heading, font=("Helvetica Neue", 11, "bold")).pack(pady=(15, 5))
+        self.progress = ttk.Progressbar(self.popup, orient="horizontal", length=300, mode="determinate")
+        self.progress.pack(pady=5)
+        self.status = tk.Label(self.popup, text="Starting download...", font=("Courier New", 9))
+        self.status.pack(pady=5)
+        self.start_time = time.time()
+        self.popup.update()
+
+    def set_status(self, text: str) -> None:
+        self.status.config(text=text)
+        self.popup.update()
+
+    def reporthook(self, blocknum, blocksize, totalsize) -> None:
         if blocknum == 0:
-            start_time[0] = time.time()
+            self.start_time = time.time()
             return
-        elapsed = time.time() - start_time[0]
+
+        elapsed = max(time.time() - self.start_time, 0.001)
         current = blocknum * blocksize
-        pct = min(current * 100.0 / totalsize, 100) if totalsize > 0 else 0
-        
-        avg_speed = (current / elapsed) if elapsed > 0 else 0
-        
+        percent = min(current * 100.0 / totalsize, 100) if totalsize > 0 else 0
         downloaded_mb = current / (1024 * 1024)
         total_mb = totalsize / (1024 * 1024) if totalsize > 0 else 0
-        
-        if avg_speed >= 1024 * 1024:
-            speed_str = f"{avg_speed/(1024*1024):.1f} MB/s"
-        else:
-            speed_str = f"{avg_speed/1024:.1f} KB/s"
-            
-        lbl_status.config(text=f"{pct:.0f}% | {downloaded_mb:.1f}/{total_mb:.1f}MB | {speed_str}")
-        progress["value"] = pct
-        popup.update()
+        speed = current / elapsed
+        speed_text = f"{speed / 1024 / 1024:.1f} MB/s" if speed >= 1024 * 1024 else f"{speed / 1024:.1f} KB/s"
 
-    try:
-        popup.update()
-        lbl_status.config(text="Resolving latest Deno build...")
-        popup.update()
-        
-        # Download the archive
-        archive_path = local_bin / "deno.zip"
-        url = "https://github.com/denoland/deno/releases/latest/download/deno-x86_64-pc-windows-msvc.zip"
+        self.status.config(text=f"{percent:.0f}% | {downloaded_mb:.1f}/{total_mb:.1f}MB | {speed_text}")
+        self.progress["value"] = percent
+        self.popup.update()
 
-        urllib.request.urlretrieve(url, archive_path, reporthook)
-
-        # Extract deno.exe
-        lbl_status.config(text="Extracting archive...")
-        popup.update()
-        with zipfile.ZipFile(archive_path, 'r') as z:
-            z.extractall(local_bin)
-
-        archive_path.unlink(missing_ok=True)
-            
+    def close(self) -> None:
         time.sleep(0.3)
-        popup.destroy()
-        return True
-    except Exception as e:
-        messagebox.showerror("Deno Download Error", f"Failed to download Deno:\n{e}", parent=popup)
-        popup.destroy()
-        return False
+        self.popup.destroy()
+
+    def show_error(self, title: str, message: str) -> None:
+        messagebox.showerror(title, message, parent=self.popup)
+        self.popup.destroy()
+
+
+def _download(url: str, target: Path, popup: _ProgressPopup | None = None) -> None:
+    hook = popup.reporthook if popup else None
+    urllib.request.urlretrieve(url, target, hook)
+
+
+def _install_ffmpeg_windows(local_bin: Path, popup: _ProgressPopup) -> None:
+    popup.set_status("Fetching extractor...")
+    sza_path = local_bin / "7zr.exe"
+    _download(SEVEN_Z_URL, sza_path)
+
+    popup.set_status("Resolving latest FFmpeg build...")
+    req = urllib.request.Request(FFMPEG_RELEASE_API, headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(req) as response:
+        release = json.loads(response.read())
+    asset = next(item for item in release["assets"] if "win64-nonfree" in item["name"])
+
+    archive_path = local_bin / "ffmpeg.7z"
+    _download(asset["browser_download_url"], archive_path, popup)
+
+    popup.set_status("Extracting archive...")
+    subprocess.run(
+        [str(sza_path), "e", str(archive_path), "-o" + str(local_bin), "*.exe", "-r", "-y"],
+        check=True,
+        capture_output=True,
+        creationflags=_creationflags(),
+    )
+    archive_path.unlink(missing_ok=True)
+    sza_path.unlink(missing_ok=True)
+
+
+def _install_ffmpeg_macos(local_bin: Path, popup: _ProgressPopup) -> None:
+    zip_path = local_bin / "ffmpeg.zip"
+    _download("https://evermeet.cx/ffmpeg/getrelease/zip", zip_path, popup)
+    popup.set_status("Extracting archive...")
+    with zipfile.ZipFile(zip_path, "r") as archive:
+        archive.extractall(local_bin)
+    zip_path.unlink(missing_ok=True)
+    (local_bin / "ffmpeg").chmod(0o755)
+
+
+def _install_ffmpeg_linux(local_bin: Path, popup: _ProgressPopup) -> None:
+    import tarfile
+
+    tar_path = local_bin / "ffmpeg.tar.xz"
+    _download("https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz", tar_path, popup)
+    popup.set_status("Extracting archive...")
+    with tarfile.open(tar_path, "r:xz") as archive:
+        for member in archive.getmembers():
+            if member.name.endswith("ffmpeg") or member.name.endswith("ffprobe"):
+                member.name = Path(member.name).name
+                archive.extract(member, local_bin)
+    tar_path.unlink(missing_ok=True)
+    (local_bin / "ffmpeg").chmod(0o755)
+
+
+def _install_deno_windows(local_bin: Path, popup: _ProgressPopup) -> None:
+    popup.set_status("Resolving latest Deno build...")
+    archive_path = local_bin / "deno.zip"
+    _download(DENO_WINDOWS_URL, archive_path, popup)
+
+    popup.set_status("Extracting archive...")
+    with zipfile.ZipFile(archive_path, "r") as archive:
+        archive.extractall(local_bin)
+    archive_path.unlink(missing_ok=True)

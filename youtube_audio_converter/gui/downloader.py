@@ -10,9 +10,15 @@ try:
 except ImportError:
     yt_dlp = None
 
-from youtube_audio_converter.core.download import DownloadCallbacks, DownloadSettings, run_download_job, summarize_elapsed
+from youtube_audio_converter.core.download import run_download_job, summarize_elapsed
+from youtube_audio_converter.core.download_types import DownloadCallbacks, DownloadSettings
 from youtube_audio_converter.core.formats import normalize_quality, quality_label_map, supports_audio_filters
 from youtube_audio_converter.core.formatting import fmt_duration, fmt_speed
+from youtube_audio_converter.core.postprocessor_labels import (
+    FINALIZING_POSTPROCESSORS,
+    PROGRESS_POSTPROCESSORS,
+    postprocessor_label,
+)
 from youtube_audio_converter.core.runtime import DownloadRuntime
 from youtube_audio_converter.core.urls import parse_source_line
 from youtube_audio_converter.dependencies import get_ffmpeg_path
@@ -25,7 +31,8 @@ class GUIDownloaderMixin:
             messagebox.showinfo("Retry Errors", "Wait for the current run to finish before retrying failed items.")
             return
 
-        failed = list(getattr(self, "failed_items", []))
+        with self.failed_items_lock:
+            failed = list(self.failed_items)
         urls = [
             item.get("url") if isinstance(item, dict) else getattr(item, "url", "")
             for item in failed
@@ -41,7 +48,8 @@ class GUIDownloaderMixin:
         for url in urls:
             self._add_playlist_row(url_text=url)
 
-        self.failed_items.clear()
+        with self.failed_items_lock:
+            self.failed_items.clear()
         self.log("SYSTEM", f"Retrying {len(urls)} failed URL(s).", "INFO")
         self._start()
 
@@ -121,8 +129,8 @@ class GUIDownloaderMixin:
         convert_slots = max(1, int(self.var_concurrent_converts.get() or 1))
         start_delay = max(0.0, float(self.var_download_start_delay.get() or 0.0))
         self.download_runtime = DownloadRuntime(download_slots, convert_slots, start_delay)
-        self.failed_items = []
-        self.failed_items_lock = threading.Lock()
+        with self.failed_items_lock:
+            self.failed_items.clear()
 
         self.log(
             "SYSTEM",
@@ -205,7 +213,7 @@ class GUIDownloaderMixin:
 
     def _on_item_failed(self, job: PlaylistJob, item, failure):
         failed = failure.as_dict() if hasattr(failure, "as_dict") else dict(failure)
-        with getattr(self, "failed_items_lock", threading.Lock()):
+        with self.failed_items_lock:
             self.failed_items.append(failed)
         if item is not None:
             self._mark_active_failed(job, item, "Failed")
@@ -250,23 +258,7 @@ class GUIDownloaderMixin:
     def _pp_hook(self, job: PlaylistJob, item, data: dict):
         status = data.get("status")
         processor = data.get("postprocessor", "unknown")
-        labels = {
-            "ExtractAudio": "Extracting audio with FFmpeg",
-            "Merger": "Muxing video and audio",
-            "VideoConvertor": "Converting video container",
-            "Metadata": "Writing metadata tags",
-            "ThumbnailsConvertor": "Converting artwork to JPEG",
-            "EmbedThumbnail": "Embedding artwork into file",
-            "MoveFiles": "Moving final file",
-        }
-        label = labels.get(processor, f"Post-processing: {processor}")
-        progress_processors = {"ExtractAudio", "Merger", "VideoConvertor"}
-        finalizing_processors = {
-            "Metadata",
-            "ThumbnailsConvertor",
-            "EmbedThumbnail",
-            "MoveFiles",
-        }
+        label = postprocessor_label(processor)
 
         seen_attr = {
             "waiting": "_pp_waiting_seen",
@@ -292,7 +284,7 @@ class GUIDownloaderMixin:
             )
         elif status == "started":
             self.log(job.playlist_title, f"{label}...", "INFO")
-            if processor in progress_processors:
+            if processor in PROGRESS_POSTPROCESSORS:
                 duration = item.duration or float((data.get("info_dict") or {}).get("duration") or 0)
                 item.duration = duration
                 if duration:
@@ -315,7 +307,7 @@ class GUIDownloaderMixin:
                     "Converting",
                     f"{label}: {item.expected_path}",
                 )
-            elif processor in finalizing_processors:
+            elif processor in FINALIZING_POSTPROCESSORS:
                 self._set_active_progress(
                     job,
                     item,
@@ -327,7 +319,7 @@ class GUIDownloaderMixin:
                 self.after(0, lambda it=item, stage=label: self.lbl_current.config(text=f"{stage}: {it.title[:52]}"))
         elif status == "finished":
             self.log(job.playlist_title, f"{label} complete", "SUCCESS")
-            if processor in finalizing_processors:
+            if processor in FINALIZING_POSTPROCESSORS:
                 self._set_active_progress(
                     job,
                     item,

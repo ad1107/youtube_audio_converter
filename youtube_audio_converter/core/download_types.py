@@ -1,7 +1,10 @@
 from dataclasses import dataclass, field
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 
 from .ffmpeg_progress import FFmpegProgress
+
+if TYPE_CHECKING:
+    from .runtime import DownloadRuntime
 
 
 LogCallback = Callable[[str, str, str], None]
@@ -32,7 +35,7 @@ class DownloadSettings:
     concurrent_downloads: int = 2
     concurrent_converts: int = 1
     download_start_delay: float = 10.0
-    runtime: "object | None" = field(default=None, repr=False)
+    runtime: "DownloadRuntime | None" = field(default=None, repr=False)
 
 
 @dataclass

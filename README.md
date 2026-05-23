@@ -162,7 +162,7 @@ In the GUI, use Cookies File or Browser Cookies. If both are set, the cookie fil
 - `youtube_audio_converter/entrypoint.py` selects GUI or CLI mode.
 - `youtube_audio_converter/cli.py` owns CLI parsing and batch execution.
 - `youtube_audio_converter/gui/` contains the Tkinter app, layout, settings, log view, progress view, and GUI download controller.
-- `youtube_audio_converter/core/` contains download orchestration, format definitions, FFmpeg progress parsing, yt-dlp options, URL parsing, cookies, and runtime concurrency gates.
+- `youtube_audio_converter/core/` contains download orchestration, format definitions, path planning, postprocessor construction, FFmpeg progress parsing, yt-dlp options, URL parsing, cookies, and runtime concurrency gates.
 - `youtube_audio_converter/dependencies.py` handles FFmpeg and Deno discovery/download helpers.
 
 ## Notes

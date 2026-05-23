@@ -5,9 +5,11 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-from .core.download import DownloadCallbacks, DownloadSettings, run_download_job
+from .core.download import run_download_job
+from .core.download_types import DownloadCallbacks, DownloadSettings
 from .core.formats import FORMAT_SPECS, format_codes, normalize_quality, quality_options_for_format
 from .core.formatting import fmt_duration, fmt_speed
+from .core.postprocessor_labels import postprocessor_label
 from .core.runtime import DownloadRuntime
 from .core.urls import load_sources
 from .dependencies import get_deno_path, get_ffmpeg_path
@@ -15,8 +17,7 @@ from .gui.models import PlaylistJob
 
 
 class ConsoleReporter:
-    def __init__(self, verbose: bool = False):
-        self.verbose = verbose
+    def __init__(self):
         self._lock = threading.Lock()
         for stream in (sys.stdout, sys.stderr):
             if hasattr(stream, "reconfigure"):
@@ -136,7 +137,7 @@ def run_cli(args) -> int:
     start_delay = max(0.0, args.download_start_delay)
     runtime = DownloadRuntime(download_slots, convert_slots, start_delay)
 
-    reporter = ConsoleReporter(verbose=args.verbose)
+    reporter = ConsoleReporter()
     reporter.log(
         "SYSTEM",
         f"Launching {len(jobs)} source(s), DL {download_slots}, convert {convert_slots}, start gap {start_delay:g}s",
@@ -239,16 +240,7 @@ def _run_cli_job(
     def on_postprocessor(active_job, item, data):
         status = data.get("status")
         processor = data.get("postprocessor", "unknown")
-        labels = {
-            "ExtractAudio": "Extracting audio with FFmpeg",
-            "Merger": "Muxing video and audio",
-            "VideoConvertor": "Converting video container",
-            "Metadata": "Writing metadata tags",
-            "ThumbnailsConvertor": "Converting artwork to JPEG",
-            "EmbedThumbnail": "Embedding artwork into file",
-            "MoveFiles": "Moving final file",
-        }
-        label = labels.get(processor, f"Post-processing: {processor}")
+        label = postprocessor_label(processor)
         seen_attr = f"_cli_pp_{status}_seen"
         seen = getattr(item, seen_attr, set())
         if processor in seen:

@@ -200,10 +200,6 @@ def final_output_ext(fmt: str) -> str:
     return get_format_spec(fmt).final_ext
 
 
-def supports_thumbnail(fmt: str) -> bool:
-    return get_format_spec(fmt).supports_thumbnail
-
-
 def supports_audio_filters(fmt: str) -> bool:
     return get_format_spec(fmt).supports_audio_filters
 

@@ -33,6 +33,8 @@ class YoutubeAudioConverter(
         self.configure(bg=Theme.BG)
 
         self.jobs: list[PlaylistJob] = []
+        self.failed_items: list[dict] = []
+        self.failed_items_lock = threading.Lock()
         self.log_queue: queue.Queue = queue.Queue()
         self.is_running = False
         self.cancel_flag = threading.Event()

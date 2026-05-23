@@ -3,11 +3,9 @@ from __future__ import annotations
 import contextlib
 import itertools
 import os
-import queue
 import re
 import subprocess
 import threading
-import time
 from dataclasses import dataclass
 from typing import Callable
 
@@ -33,8 +31,7 @@ _install_lock = threading.Lock()
 _installed = False
 _original_real_run = yt_ffmpeg.FFmpegPostProcessor.real_run_ffmpeg
 _FIELD_RE = re.compile(r"(?P<key>frame|fps|q|size|time|bitrate|speed)\s*=\s*(?P<value>[^\s\r\n]+)")
-_STALL_TIMEOUT_SECONDS = 300.0
-_GATED_POSTPROCESSORS = {
+_PROGRESS_POSTPROCESSORS = {
     "FFmpegConcatPP",
     "FFmpegCopyStreamPP",
     "FFmpegExtractAudioPP",
@@ -54,17 +51,14 @@ def install_ffmpeg_progress_patch() -> None:
 
 
 @contextlib.contextmanager
-def ffmpeg_progress_context(callback: ProgressCallback | None, conversion_gate=None):
+def ffmpeg_progress_context(callback: ProgressCallback | None):
     install_ffmpeg_progress_patch()
     previous_callback = getattr(_state, "callback", None)
-    previous_gate = getattr(_state, "conversion_gate", None)
     _state.callback = callback
-    _state.conversion_gate = conversion_gate
     try:
         yield
     finally:
         _state.callback = previous_callback
-        _state.conversion_gate = previous_gate
 
 
 def parse_ffmpeg_status(text: str) -> FFmpegProgress | None:
@@ -98,25 +92,15 @@ def _parse_time(value: str) -> float:
 
 def _patched_real_run_ffmpeg(self, input_path_opts, output_path_opts, *, expected_retcodes=(0,)):
     callback = getattr(_state, "callback", None)
-    conversion_gate = getattr(_state, "conversion_gate", None)
     if callback is None:
         return _original_real_run(self, input_path_opts, output_path_opts, expected_retcodes=expected_retcodes)
 
-    if not _uses_conversion_gate(self):
-        return _run_ffmpeg_with_progress(self, input_path_opts, output_path_opts, expected_retcodes, None)
-
-    if conversion_gate is None:
-        return _run_ffmpeg_with_progress(self, input_path_opts, output_path_opts, expected_retcodes, callback)
-
-    conversion_gate.acquire()
-    try:
-        return _run_ffmpeg_with_progress(self, input_path_opts, output_path_opts, expected_retcodes, callback)
-    finally:
-        conversion_gate.release()
+    progress_callback = callback if _emits_progress(self) else None
+    return _run_ffmpeg_with_progress(self, input_path_opts, output_path_opts, expected_retcodes, progress_callback)
 
 
-def _uses_conversion_gate(postprocessor) -> bool:
-    return type(postprocessor).__name__ in _GATED_POSTPROCESSORS
+def _emits_progress(postprocessor) -> bool:
+    return type(postprocessor).__name__ in _PROGRESS_POSTPROCESSORS
 
 
 def _run_ffmpeg_with_progress(self, input_path_opts, output_path_opts, expected_retcodes, callback):
@@ -166,17 +150,10 @@ def _run_ffmpeg_with_progress(self, input_path_opts, output_path_opts, expected_
         proc.stdin.close()
 
     assert proc.stderr is not None
-    stderr_queue: queue.Queue[bytes | None] = queue.Queue()
-    reader = threading.Thread(target=_read_stderr, args=(proc.stderr, stderr_queue), daemon=True)
-    reader.start()
-
     stderr_chunks: list[bytes] = []
     partial = ""
     decoder = _IncrementalDecoder()
     last_progress: FFmpegProgress | None = None
-    last_output_time = time.monotonic()
-    stalled = False
-    stall_reason = ""
 
     def capture_progress(progress: FFmpegProgress) -> None:
         nonlocal last_progress
@@ -185,25 +162,12 @@ def _run_ffmpeg_with_progress(self, input_path_opts, output_path_opts, expected_
             callback(progress)
 
     while True:
-        try:
-            chunk = stderr_queue.get(timeout=1.0)
-        except queue.Empty:
-            if proc.poll() is not None and not reader.is_alive():
-                break
-            if time.monotonic() - last_output_time > _STALL_TIMEOUT_SECONDS:
-                stalled = True
-                stall_reason = f"no stderr output for {_STALL_TIMEOUT_SECONDS:g}s"
-                proc.kill()
-                break
-            continue
-
-        if chunk is None:
+        chunk = os.read(proc.stderr.fileno(), 4096)
+        if not chunk:
             break
-        last_output_time = time.monotonic()
         stderr_chunks.append(chunk)
         partial = _consume_progress_text(partial + decoder.decode(chunk), capture_progress)
 
-    reader.join(timeout=2.0)
     tail = decoder.decode(b"", final=True)
     if tail:
         partial = _consume_progress_text(partial + tail, capture_progress)
@@ -212,10 +176,6 @@ def _run_ffmpeg_with_progress(self, input_path_opts, output_path_opts, expected_
 
     returncode = proc.wait()
     stderr = b"".join(stderr_chunks).decode("utf-8", errors="replace")
-
-    if stalled:
-        self.write_debug(stderr)
-        raise yt_ffmpeg.FFmpegPostProcessorError(f"ffmpeg stalled: {stall_reason}")
 
     if returncode not in yt_ffmpeg.variadic(expected_retcodes):
         self.write_debug(stderr)
@@ -243,17 +203,6 @@ def _run_ffmpeg_with_progress(self, input_path_opts, output_path_opts, expected_
 def _should_faststart(output_path: str) -> bool:
     ext = os.path.splitext(str(output_path or ""))[1].lower()
     return ext in {".mp4", ".mov"}
-
-
-def _read_stderr(stream, stderr_queue: queue.Queue[bytes | None]) -> None:
-    try:
-        while True:
-            chunk = os.read(stream.fileno(), 4096)
-            if not chunk:
-                break
-            stderr_queue.put(chunk)
-    finally:
-        stderr_queue.put(None)
 
 
 class _IncrementalDecoder:

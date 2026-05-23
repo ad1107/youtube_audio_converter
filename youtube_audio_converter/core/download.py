@@ -17,15 +17,15 @@ from .formats import (
     supports_audio_filters,
 )
 from .formatting import fmt_duration
-from .media import (
-    build_postprocessors,
-    clone_postprocessors,
+from .paths import (
     existing_output_path,
+    expected_output_path,
     filename_info,
     item_template,
     item_url,
     output_folder_for,
 )
+from .postprocessing import build_postprocessors
 from .runtime import DownloadRuntime
 from .urls import detect_no_playlist, url_kind_label
 from .ydl_options import build_ydl_options, build_yt_logger
@@ -42,13 +42,7 @@ def run_download_job(job, settings: DownloadSettings, callbacks: DownloadCallbac
     try:
         settings.quality = normalize_quality(settings.fmt, settings.quality)
     except ValueError as exc:
-        failure = _record_failure(job, failures, callbacks, None, str(exc), job.url)
-        job.status = "error"
-        job.error_msg = failure.reason
-        job.total_videos = max(getattr(job, "total_videos", 0), 1)
-        job.failed_videos = 1
-        job.end_time = time.time()
-        return failures
+        return _finish_failed_job(job, failures, callbacks, str(exc), job.url)
 
     if settings.runtime is None:
         settings.runtime = DownloadRuntime(
@@ -83,22 +77,10 @@ def run_download_job(job, settings: DownloadSettings, callbacks: DownloadCallbac
         with yt_dlp.YoutubeDL(metadata_opts) as ydl:
             info = ydl.extract_info(job.url, download=False)
     except Exception as exc:
-        failure = _record_failure(job, failures, callbacks, None, str(exc), job.url)
-        job.status = "error"
-        job.error_msg = failure.reason
-        job.total_videos = max(getattr(job, "total_videos", 0), 1)
-        job.failed_videos = 1
-        job.end_time = time.time()
-        return failures
+        return _finish_failed_job(job, failures, callbacks, str(exc), job.url)
 
     if info is None:
-        failure = _record_failure(job, failures, callbacks, None, "Could not retrieve metadata", job.url)
-        job.status = "error"
-        job.error_msg = failure.reason
-        job.total_videos = max(getattr(job, "total_videos", 0), 1)
-        job.failed_videos = 1
-        job.end_time = time.time()
-        return failures
+        return _finish_failed_job(job, failures, callbacks, "Could not retrieve metadata", job.url)
 
     is_playlist = "entries" in info and not no_playlist
     entries = [entry for entry in (info.get("entries") or []) if entry] if is_playlist else [info]
@@ -200,17 +182,15 @@ def _download_item(job, item: DownloadItem, settings: DownloadSettings, callback
             callbacks.log(job.playlist_title, f"Retrying {item.title} (attempt {attempt}/{attempts})", "WARNING")
             time.sleep(2)
 
-        postprocessors, postprocessor_args = clone_postprocessors(
-            *build_postprocessors(
-                fmt=settings.fmt,
-                quality=settings.quality,
-                speed=settings.speed,
-                volume=settings.volume,
-                embed_thumbnail=settings.embed_thumbnail,
-                crop_thumb=settings.crop_thumbnail,
-                embed_metadata=settings.embed_metadata,
-                skip_existing=settings.skip_existing,
-            )
+        postprocessors, postprocessor_args = build_postprocessors(
+            fmt=settings.fmt,
+            quality=settings.quality,
+            speed=settings.speed,
+            volume=settings.volume,
+            embed_thumbnail=settings.embed_thumbnail,
+            crop_thumb=settings.crop_thumbnail,
+            embed_metadata=settings.embed_metadata,
+            skip_existing=settings.skip_existing,
         )
 
         download_slot_acquired = False
@@ -321,7 +301,7 @@ def _make_item(entry: dict, job, settings: DownloadSettings, index: int, is_play
     title = entry.get("title") or f"Track {index:02d}"
     info = filename_info(entry, job.playlist_title, index, settings.fmt)
     outtmpl = item_template(job.output_folder, index, settings.track_num, is_playlist, title=title)
-    expected_path = existing_output_path(outtmpl, info, settings.fmt) or _expected_path(outtmpl, info, settings.fmt)
+    expected_path = existing_output_path(outtmpl, info, settings.fmt) or expected_output_path(outtmpl, info, settings.fmt)
     return DownloadItem(
         index=index,
         title=title,
@@ -331,13 +311,6 @@ def _make_item(entry: dict, job, settings: DownloadSettings, index: int, is_play
         duration=float(entry.get("duration") or 0),
         info=info,
     )
-
-
-def _expected_path(outtmpl: str, info: dict, fmt: str) -> str:
-    from .media import expected_output_path
-
-    return expected_output_path(outtmpl, info, fmt)
-
 
 def _record_failure(
     job,
@@ -359,6 +332,22 @@ def _record_failure(
     callbacks.on_item_failed(job, item, failure)
     callbacks.log(failure.playlist_title, f"Failed: {failure.title} ({reason})", "ERROR")
     return failure
+
+
+def _finish_failed_job(
+    job,
+    failures: list[FailedItem],
+    callbacks: DownloadCallbacks,
+    reason: str,
+    fallback_url: str,
+) -> list[FailedItem]:
+    failure = _record_failure(job, failures, callbacks, None, reason, fallback_url)
+    job.status = "error"
+    job.error_msg = failure.reason
+    job.total_videos = max(getattr(job, "total_videos", 0), 1)
+    job.failed_videos = 1
+    job.end_time = time.time()
+    return failures
 
 
 def summarize_elapsed(job) -> str:
