@@ -2,8 +2,13 @@
 
 Download YouTube videos, single tracks, playlists, audiobooks, podcasts, and music compilations from a GUI or CLI. The app can convert downloads into audio files for music libraries, keep video files in common containers, embed metadata and artwork when the target format supports it, and resume playlist updates without downloading files that already exist.
 
+![YouTube Audio/Video Converter GUI](demo.png)
+
+The GUI has been rewritten on PySide6/Qt, replacing the older Tkinter interface with a more modern desktop app shell. The rewrite keeps the same downloader logic, CLI, formats, and retry/resume behaviour, but adds a cleaner dark UI, draggable split panes, and a progress table designed to stay responsive with large playlists.
+
 ## Highlights
 
+- Modern PySide6/Qt GUI with resizable panes, Progress View, and Log View.
 - Audio output: M4A/AAC, HE-AAC Mono, MP3, Opus, FLAC, ALAC, WAV, AIFF.
 - Video output: MP4, MKV, WebM.
 - Format-specific quality presets instead of one shared quality list.
@@ -58,7 +63,7 @@ or:
 python -m youtube_audio_converter
 ```
 
-The GUI places URLs, output folder, and settings on the left. Progress View and Log View are on the right. Start Download, Stop, Retry Errors, and the post-run power action selector are in the bottom action bar.
+The GUI places URLs, output folder, and settings on the left. Progress View and Log View are on the right. The main panes and left-side sections are draggable split views, so you can give more room to large source lists, settings, or active progress rows.
 
 ## Run From The CLI
 
@@ -161,7 +166,7 @@ In the GUI, use Cookies File or Browser Cookies. If both are set, the cookie fil
 - `main.py` is a compatibility launcher.
 - `youtube_audio_converter/entrypoint.py` selects GUI or CLI mode.
 - `youtube_audio_converter/cli.py` owns CLI parsing and batch execution.
-- `youtube_audio_converter/gui/` contains the Tkinter app, layout, settings, log view, progress view, and GUI download controller.
+- `youtube_audio_converter/gui/` contains the PySide6/Qt app shell, layout, settings controls, log view, progress tree, and GUI download controller.
 - `youtube_audio_converter/core/` contains download orchestration, format definitions, path planning, postprocessor construction, FFmpeg progress parsing, yt-dlp options, URL parsing, cookies, and runtime concurrency gates.
 - `youtube_audio_converter/dependencies.py` handles FFmpeg and Deno discovery/download helpers.
 
