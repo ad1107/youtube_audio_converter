@@ -2,19 +2,19 @@ from youtube_audio_converter.core.formats import format_label_map, quality_label
 
 
 class Theme:
-    BG = "#0d1117"
-    BG2 = "#161b22"
-    BG3 = "#21262d"
-    BG4 = "#30363d"
-    ACCENT = "#58a6ff"
-    GREEN = "#3fb950"
-    YELLOW = "#d29922"
-    RED = "#f85149"
-    PURPLE = "#bc8cff"
-    TEXT = "#c9d1d9"
-    MUTED = "#6e7681"
-    BORDER = "#30363d"
-    WHITE = "#f0f6fc"
+    BG = "#202020"
+    BG2 = "#252525"
+    BG3 = "#303030"
+    BG4 = "#3a3a3a"
+    ACCENT = "#0078d4"
+    GREEN = "#6ccb5f"
+    YELLOW = "#f2c94c"
+    RED = "#d83b01"
+    PURPLE = "#b69cff"
+    TEXT = "#f3f3f3"
+    MUTED = "#a7a7a7"
+    BORDER = "#454545"
+    WHITE = "#ffffff"
 
 
 LOG_COLOURS = {

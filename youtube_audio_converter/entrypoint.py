@@ -1,6 +1,5 @@
 from .cli import build_parser, run_cli
 from .dependencies import download_ffmpeg_if_needed
-from .gui import YoutubeAudioConverter
 
 
 def should_use_cli(args) -> bool:
@@ -22,9 +21,15 @@ def main(argv=None) -> int:
     if should_use_cli(args):
         return run_cli(args)
 
-    if not download_ffmpeg_if_needed():
-        print("WARNING: ffmpeg not found in PATH and could not be downloaded. Audio conversion will fail.")
+    from .gui import YoutubeAudioConverter
 
     app = YoutubeAudioConverter()
+    app.show()
+
+    if not download_ffmpeg_if_needed(app.main_window):
+        print("WARNING: ffmpeg not found in PATH and could not be downloaded. Audio conversion will fail.")
+        app.main_window.log("SYSTEM", "FFmpeg not found and automatic download failed. Audio conversion will fail.", "WARNING")
+
+    app.main_window.refresh_dependencies()
     app.mainloop()
     return 0

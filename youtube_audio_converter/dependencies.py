@@ -7,13 +7,26 @@ import time
 import urllib.request
 import zipfile
 from pathlib import Path
-from tkinter import messagebox, ttk
-import tkinter as tk
+from typing import Protocol
 
 
 FFMPEG_RELEASE_API = "https://api.github.com/repos/AnimMouse/ffmpeg-autobuild/releases/latest"
 SEVEN_Z_URL = "https://github.com/ip7z/7zip/releases/download/26.01/7zr.exe"
 DENO_WINDOWS_URL = "https://github.com/denoland/deno/releases/latest/download/deno-x86_64-pc-windows-msvc.zip"
+
+
+class ProgressReporter(Protocol):
+    def set_status(self, text: str) -> None:
+        ...
+
+    def reporthook(self, blocknum, blocksize, totalsize) -> None:
+        ...
+
+    def close(self) -> None:
+        ...
+
+    def show_error(self, title: str, message: str) -> None:
+        ...
 
 
 def get_local_bin_path() -> Path:
@@ -50,20 +63,20 @@ def download_ffmpeg_if_needed(parent=None):
         return True
 
     local_bin = _ensure_local_bin()
-    popup = _ProgressPopup(parent, "Auto-Downloading FFmpeg", "Configuring FFmpeg Environment...")
+    progress = _progress_reporter(parent, "Auto-Downloading FFmpeg", "Configuring FFmpeg Environment...")
     try:
         if sys.platform == "win32":
-            _install_ffmpeg_windows(local_bin, popup)
+            _install_ffmpeg_windows(local_bin, progress)
         elif sys.platform == "darwin":
-            _install_ffmpeg_macos(local_bin, popup)
+            _install_ffmpeg_macos(local_bin, progress)
         else:
-            _install_ffmpeg_linux(local_bin, popup)
+            _install_ffmpeg_linux(local_bin, progress)
 
         _prepend_path(local_bin)
-        popup.close()
+        progress.close()
         return True
     except Exception as exc:
-        popup.show_error("FFmpeg Download Error", f"Failed to download FFmpeg:\n{exc}")
+        progress.show_error("FFmpeg Download Error", f"Failed to download FFmpeg:\n{exc}")
         return False
 
 
@@ -72,14 +85,21 @@ def download_deno_if_needed(parent=None):
         return True
 
     local_bin = _ensure_local_bin()
-    popup = _ProgressPopup(parent, "Downloading Deno", "Setting up Deno Environment...")
+    progress = _progress_reporter(parent, "Downloading Deno", "Setting up Deno Environment...")
     try:
-        _install_deno_windows(local_bin, popup)
-        popup.close()
+        _install_deno_windows(local_bin, progress)
+        progress.close()
         return True
     except Exception as exc:
-        popup.show_error("Deno Download Error", f"Failed to download Deno:\n{exc}")
+        progress.show_error("Deno Download Error", f"Failed to download Deno:\n{exc}")
         return False
+
+
+def _progress_reporter(parent, title: str, heading: str) -> ProgressReporter:
+    factory = getattr(parent, "create_progress_reporter", None)
+    if callable(factory):
+        return factory(title, heading)
+    return _ConsoleProgress(title, heading)
 
 
 def _local_executable(name: str) -> Path:
@@ -104,74 +124,67 @@ def _creationflags() -> int:
     return subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 
 
-class _ProgressPopup:
-    def __init__(self, parent, title: str, heading: str):
-        self.popup = tk.Toplevel(parent) if parent else tk.Tk()
-        self.popup.title(title)
-        self.popup.geometry("380x150")
-        if parent:
-            self.popup.transient(parent)
-        self.popup.grab_set()
-        self.popup.focus_force()
-
-        tk.Label(self.popup, text=heading, font=("Helvetica Neue", 11, "bold")).pack(pady=(15, 5))
-        self.progress = ttk.Progressbar(self.popup, orient="horizontal", length=300, mode="determinate")
-        self.progress.pack(pady=5)
-        self.status = tk.Label(self.popup, text="Starting download...", font=("Courier New", 9))
-        self.status.pack(pady=5)
+class _ConsoleProgress:
+    def __init__(self, title: str, heading: str):
+        self.title = title
+        self.heading = heading
         self.start_time = time.time()
-        self.popup.update()
+        self.last_report = 0.0
+        print(f"[INFO] {title}: {heading}", flush=True)
 
     def set_status(self, text: str) -> None:
-        self.status.config(text=text)
-        self.popup.update()
+        print(f"[INFO] {text}", flush=True)
 
     def reporthook(self, blocknum, blocksize, totalsize) -> None:
         if blocknum == 0:
             self.start_time = time.time()
+            self.last_report = 0.0
             return
 
-        elapsed = max(time.time() - self.start_time, 0.001)
+        now = time.time()
+        if now - self.last_report < 0.75:
+            return
+        self.last_report = now
+
+        elapsed = max(now - self.start_time, 0.001)
         current = blocknum * blocksize
         percent = min(current * 100.0 / totalsize, 100) if totalsize > 0 else 0
         downloaded_mb = current / (1024 * 1024)
         total_mb = totalsize / (1024 * 1024) if totalsize > 0 else 0
         speed = current / elapsed
         speed_text = f"{speed / 1024 / 1024:.1f} MB/s" if speed >= 1024 * 1024 else f"{speed / 1024:.1f} KB/s"
-
-        self.status.config(text=f"{percent:.0f}% | {downloaded_mb:.1f}/{total_mb:.1f}MB | {speed_text}")
-        self.progress["value"] = percent
-        self.popup.update()
+        if totalsize > 0:
+            print(f"[INFO] {percent:.0f}% | {downloaded_mb:.1f}/{total_mb:.1f} MB | {speed_text}", flush=True)
+        else:
+            print(f"[INFO] {downloaded_mb:.1f} MB | {speed_text}", flush=True)
 
     def close(self) -> None:
-        time.sleep(0.3)
-        self.popup.destroy()
+        return None
 
     def show_error(self, title: str, message: str) -> None:
-        messagebox.showerror(title, message, parent=self.popup)
-        self.popup.destroy()
+        print(f"[ERROR] {title}: {message}", file=sys.stderr, flush=True)
 
 
-def _download(url: str, target: Path, popup: _ProgressPopup | None = None) -> None:
-    hook = popup.reporthook if popup else None
+def _download(url: str, target: Path, progress: ProgressReporter | None = None) -> None:
+    hook = progress.reporthook if progress else None
     urllib.request.urlretrieve(url, target, hook)
 
 
-def _install_ffmpeg_windows(local_bin: Path, popup: _ProgressPopup) -> None:
-    popup.set_status("Fetching extractor...")
+def _install_ffmpeg_windows(local_bin: Path, progress: ProgressReporter) -> None:
+    progress.set_status("Fetching extractor...")
     sza_path = local_bin / "7zr.exe"
     _download(SEVEN_Z_URL, sza_path)
 
-    popup.set_status("Resolving latest FFmpeg build...")
+    progress.set_status("Resolving latest FFmpeg build...")
     req = urllib.request.Request(FFMPEG_RELEASE_API, headers={"User-Agent": "Mozilla/5.0"})
     with urllib.request.urlopen(req) as response:
         release = json.loads(response.read())
     asset = next(item for item in release["assets"] if "win64-nonfree" in item["name"])
 
     archive_path = local_bin / "ffmpeg.7z"
-    _download(asset["browser_download_url"], archive_path, popup)
+    _download(asset["browser_download_url"], archive_path, progress)
 
-    popup.set_status("Extracting archive...")
+    progress.set_status("Extracting archive...")
     subprocess.run(
         [str(sza_path), "e", str(archive_path), "-o" + str(local_bin), "*.exe", "-r", "-y"],
         check=True,
@@ -182,22 +195,22 @@ def _install_ffmpeg_windows(local_bin: Path, popup: _ProgressPopup) -> None:
     sza_path.unlink(missing_ok=True)
 
 
-def _install_ffmpeg_macos(local_bin: Path, popup: _ProgressPopup) -> None:
+def _install_ffmpeg_macos(local_bin: Path, progress: ProgressReporter) -> None:
     zip_path = local_bin / "ffmpeg.zip"
-    _download("https://evermeet.cx/ffmpeg/getrelease/zip", zip_path, popup)
-    popup.set_status("Extracting archive...")
+    _download("https://evermeet.cx/ffmpeg/getrelease/zip", zip_path, progress)
+    progress.set_status("Extracting archive...")
     with zipfile.ZipFile(zip_path, "r") as archive:
         archive.extractall(local_bin)
     zip_path.unlink(missing_ok=True)
     (local_bin / "ffmpeg").chmod(0o755)
 
 
-def _install_ffmpeg_linux(local_bin: Path, popup: _ProgressPopup) -> None:
+def _install_ffmpeg_linux(local_bin: Path, progress: ProgressReporter) -> None:
     import tarfile
 
     tar_path = local_bin / "ffmpeg.tar.xz"
-    _download("https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz", tar_path, popup)
-    popup.set_status("Extracting archive...")
+    _download("https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz", tar_path, progress)
+    progress.set_status("Extracting archive...")
     with tarfile.open(tar_path, "r:xz") as archive:
         for member in archive.getmembers():
             if member.name.endswith("ffmpeg") or member.name.endswith("ffprobe"):
@@ -207,12 +220,12 @@ def _install_ffmpeg_linux(local_bin: Path, popup: _ProgressPopup) -> None:
     (local_bin / "ffmpeg").chmod(0o755)
 
 
-def _install_deno_windows(local_bin: Path, popup: _ProgressPopup) -> None:
-    popup.set_status("Resolving latest Deno build...")
+def _install_deno_windows(local_bin: Path, progress: ProgressReporter) -> None:
+    progress.set_status("Resolving latest Deno build...")
     archive_path = local_bin / "deno.zip"
-    _download(DENO_WINDOWS_URL, archive_path, popup)
+    _download(DENO_WINDOWS_URL, archive_path, progress)
 
-    popup.set_status("Extracting archive...")
+    progress.set_status("Extracting archive...")
     with zipfile.ZipFile(archive_path, "r") as archive:
         archive.extractall(local_bin)
     archive_path.unlink(missing_ok=True)

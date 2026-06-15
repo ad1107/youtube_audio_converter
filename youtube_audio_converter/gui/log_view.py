@@ -1,77 +1,44 @@
-import queue
+import html
 from datetime import datetime
 from pathlib import Path
-from tkinter import filedialog
-import tkinter as tk
-from tkinter import ttk
+
+from PySide6 import QtGui, QtWidgets
 
 from .models import LOG_COLOURS, Theme
 
 
-class GUILogMixin:
-    def _build_log_view(self, parent):
-        self.log_text = tk.Text(
-            parent,
-            bg=Theme.BG2,
-            fg=Theme.TEXT,
-            font=("Courier New", 9),
-            relief="flat",
-            bd=0,
-            padx=10,
-            pady=8,
-            wrap="word",
-            state="disabled",
-            cursor="arrow",
-            insertbackground=Theme.TEXT,
-            selectbackground=Theme.BG4,
-        )
-        scrollbar = ttk.Scrollbar(parent, command=self.log_text.yview)
-        self.log_text.configure(yscrollcommand=scrollbar.set)
-        scrollbar.pack(side="right", fill="y")
-        self.log_text.pack(fill="both", expand=True)
-        for level, colour in LOG_COLOURS.items():
-            self.log_text.tag_configure(level, foreground=colour)
-        self.log_text.tag_configure("TS", foreground="#3d4a6a")
-        self.log_text.tag_configure("SRC", foreground=Theme.PURPLE)
-
-    def _poll_log_queue(self):
-        entries = []
-        try:
-            while True:
-                entries.append(self.log_queue.get_nowait())
-        except queue.Empty:
-            pass
-        if entries:
-            self._write_log_batch(entries)
-        self.after(40, self._poll_log_queue)
-
-    def _write_log(self, source: str, message: str, level: str, ts: datetime):
-        self._write_log_batch([(source, message, level, ts)])
-
+class LogViewMixin:
     def _write_log_batch(self, entries):
-        self.log_text.config(state="normal")
+        cursor = self.log_text.textCursor()
+        cursor.movePosition(QtGui.QTextCursor.MoveOperation.End)
         for source, message, level, ts in entries:
-            level_tag = level if level in LOG_COLOURS else "INFO"
-            self.log_text.insert("end", f"[{ts.strftime('%H:%M:%S')}] ", "TS")
-            self.log_text.insert("end", f"[{level:<8s}] ", level_tag)
+            color = LOG_COLOURS.get(level, LOG_COLOURS["INFO"])
+            ts_text = html.escape(ts.strftime("%H:%M:%S"))
+            level_text = html.escape(f"{level:<8s}")
+            source_text = ""
             if source and source.upper() != "SYSTEM":
-                self.log_text.insert("end", f"[{source[:38]:<38s}] ", "SRC")
-            self.log_text.insert("end", f"{message}\n", level_tag)
-        if hasattr(self, "var_autoscroll") and self.var_autoscroll.get():
-            self.log_text.see("end")
-        self.log_text.config(state="disabled")
+                source_text = f' <span style="color:{Theme.PURPLE}">[{html.escape(source[:38]):<38s}]</span>'
+            message_text = html.escape(str(message))
+            line = (
+                f'<span style="color:{Theme.MUTED}">[{ts_text}]</span> '
+                f'<span style="color:{color}">[{level_text}]</span>'
+                f"{source_text} "
+                f'<span style="color:{color}">{message_text}</span><br>'
+            )
+            cursor.insertHtml(line)
+        if self.autoscroll_check.isChecked():
+            self.log_text.moveCursor(QtGui.QTextCursor.MoveOperation.End)
 
     def _clear_logs(self):
-        self.log_text.config(state="normal")
-        self.log_text.delete("1.0", "end")
-        self.log_text.config(state="disabled")
+        self.log_text.clear()
 
     def _save_log(self):
-        path = filedialog.asksaveasfilename(
-            defaultextension=".txt",
-            filetypes=[("Text files", "*.txt"), ("All", "*.*")],
-            initialfile=f"audiobook_log_{datetime.now():%Y%m%d_%H%M%S}.txt",
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self,
+            "Save Log",
+            f"audiobook_log_{datetime.now():%Y%m%d_%H%M%S}.txt",
+            "Text files (*.txt);;All Files (*.*)",
         )
         if path:
-            Path(path).write_text(self.log_text.get("1.0", "end"), encoding="utf-8")
+            Path(path).write_text(self.log_text.toPlainText(), encoding="utf-8")
             self.log("SYSTEM", f"Log saved -> {path}", "SUCCESS")
